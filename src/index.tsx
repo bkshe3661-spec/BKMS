@@ -1893,13 +1893,14 @@ app.get('/master', (c) => {
     const good    = total - replace - check;
 
     const cards = [
-      { label:'전체 소화기',  value:total,   icon:'fa-fire-extinguisher', color:'from-blue-600 to-blue-800',   textColor:'text-blue-200',   valueColor:'text-white' },
-      { label:'양호',         value:good,    icon:'fa-circle-check',       color:'from-emerald-600 to-emerald-800', textColor:'text-emerald-200', valueColor:'text-white' },
-      { label:'교체 대상',    value:replace, icon:'fa-triangle-exclamation',color:'from-red-700 to-red-900',     textColor:'text-red-200',    valueColor:'text-white' },
+      { label:'전체 소화기',  value:total,   icon:'fa-fire-extinguisher',   color:'from-blue-600 to-blue-800',       textColor:'text-blue-200',   valueColor:'text-white' },
+      { label:'양호',         value:good,    icon:'fa-circle-check',         color:'from-emerald-600 to-emerald-800', textColor:'text-emerald-200', valueColor:'text-white' },
+      { label:'점검 필요',    value:check,   icon:'fa-clock',                color:'from-amber-600 to-amber-800',     textColor:'text-amber-200',  valueColor:'text-white' },
+      { label:'교체 대상',    value:replace, icon:'fa-triangle-exclamation', color:'from-red-700 to-red-900',         textColor:'text-red-200',    valueColor:'text-white' },
     ];
 
     return (
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
         {cards.map((c, i) => (
           <div key={i} className={"rounded-xl p-5 bg-gradient-to-br " + c.color + " shadow-lg animate-in"} style={{animationDelay: i*0.07+'s'}}>
             <div className="flex items-center justify-between mb-2">
@@ -2168,6 +2169,7 @@ app.get('/master', (c) => {
                 <thead>
                   <tr className="bg-slate-800 text-slate-400 text-xs uppercase tracking-wide">
                     <th className="px-4 py-3 text-center w-10">No.</th>
+                    <th className="px-4 py-3 text-center">고유 번호</th>
                     <th className="px-4 py-3 text-left">설치 위치</th>
                     <th className="px-4 py-3 text-left">소화기 종류</th>
                     <th className="px-4 py-3 text-center">제조년월</th>
@@ -2182,7 +2184,7 @@ app.get('/master', (c) => {
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="text-center py-16 text-slate-500">
+                      <td colSpan={11} className="text-center py-16 text-slate-500">
                         <i className="fas fa-inbox text-3xl mb-3 block opacity-40"></i>
                         검색 결과가 없습니다.
                       </td>
@@ -2196,6 +2198,9 @@ app.get('/master', (c) => {
                     return (
                       <tr key={item.id} className={rowCls}>
                         <td className={"px-4 py-3 text-center text-slate-500 text-xs " + (isRepl ? "text-red-500" : "")}>{item.id}</td>
+                        <td className={"px-4 py-3 text-center font-mono text-xs " + (isRepl ? "text-red-400" : "text-slate-400")}>
+                          {'BK-FE-' + String(item.id).padStart(3, '0')}
+                        </td>
                         <td className={"px-4 py-3 font-medium " + (isRepl ? "text-red-400 font-semibold" : "text-slate-100")}>
                           {item.location || '-'}
                         </td>
