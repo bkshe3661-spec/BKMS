@@ -729,17 +729,25 @@ const App = (() => {
     const vpH = State.viewH || vp().clientHeight
     const iw  = State.imgNaturalW || 1992
     const ih  = State.imgNaturalH || 1588
-    // cover 방식: 가로·세로 중 더 큰 비율 사용 → 항상 빈 여백 없음
-    return Math.max(vpW / iw, vpH / ih)
+    // contain 방식: 이미지 전체가 보이도록 더 작은 비율 사용
+    return Math.min(vpW / iw, vpH / ih)
   }
 
   function clampTranslate() {
     const vpW = State.viewW, vpH = State.viewH
     const imgW = State.imgNaturalW * State.scale
     const imgH = State.imgNaturalH * State.scale
-    // 이미지가 뷰포트보다 작을 수 없으므로 항상 0 이하 / (vpW-imgW) 이상
-    State.tx = Math.min(0, Math.max(vpW - imgW, State.tx))
-    State.ty = Math.min(0, Math.max(vpH - imgH, State.ty))
+    // contain 모드: 이미지가 뷰포트 안에서 중앙 고정
+    if (imgW <= vpW) {
+      State.tx = (vpW - imgW) / 2
+    } else {
+      State.tx = Math.min(0, Math.max(vpW - imgW, State.tx))
+    }
+    if (imgH <= vpH) {
+      State.ty = (vpH - imgH) / 2
+    } else {
+      State.ty = Math.min(0, Math.max(vpH - imgH, State.ty))
+    }
   }
 
   function resetView() {
@@ -747,13 +755,12 @@ const App = (() => {
     const vpH = State.viewH = vp().clientHeight
     const iw  = State.imgNaturalW || 1992
     const ih  = State.imgNaturalH || 1588
-    // cover: 이미지가 뷰포트를 완전히 덮도록 (더 큰 비율 기준)
-    const sc  = Math.max(vpW/iw, vpH/ih)
+    // contain: 이미지 전체가 보이도록 (더 작은 비율 기준)
+    const sc  = Math.min(vpW/iw, vpH/ih)
     State.scale = sc
     // 중앙 정렬
     State.tx = (vpW - iw*sc)/2
     State.ty = (vpH - ih*sc)/2
-    clampTranslate()
     applyTransform()
   }
 
@@ -762,7 +769,7 @@ const App = (() => {
     const vpH = State.viewH = vp().clientHeight
     cx = cx ?? vpW/2;  cy = cy ?? vpH/2
     const oldScale = State.scale
-    // 최소: cover 스케일 / 최대: 8배
+    // 최소: contain 스케일 / 최대: 8배
     State.scale = Math.min(8, Math.max(minScale(), State.scale + delta))
     const ratio = State.scale / oldScale
     State.tx = cx - ratio*(cx - State.tx)
@@ -883,13 +890,7 @@ function renderOverlays() {
     lbl.textContent = b.shortName
     div.appendChild(lbl)
 
-    // badge
-    if (dangerCount > 0 || warningCount > 0) {
-      const badge = document.createElement('div')
-      badge.className = 'bld-badge ' + (dangerCount>0?'bg-red-500':'bg-yellow-500')
-      badge.textContent = dangerCount>0 ? dangerCount : warningCount
-      div.appendChild(badge)
-    }
+    // 숫자박스 제거됨
 
     div.addEventListener('click', (e) => {
       e.stopPropagation()
@@ -909,9 +910,12 @@ function zoomToBuilding(b) {
   const vpW  = vpEl.clientWidth
   const vpH  = vpEl.clientHeight
 
+  // contain 기준 최소 스케일 (이미지 전체가 보이는 최소)
+  const containScale = Math.min(vpW/iw, vpH/ih)
+
   // 건물 중심에 줌 (건물 너비가 뷰포트의 ~40%를 차지하도록)
   const targetScale = Math.min(8, Math.max(
-    Math.max(vpW/iw, vpH/ih),   // minScale (여백 방지)
+    containScale,
     Math.max(State.scale, (vpW * 0.4) / (b.mapW/100 * iw))
   ))
   State.scale = targetScale
@@ -922,11 +926,13 @@ function zoomToBuilding(b) {
   State.tx = vpW/2 - bx
   State.ty = vpH/2 - by
 
-  // 여백 없도록 clamp
+  // contain 모드 clamp: 이미지가 뷰포트 안에 유지
   const iws = iw * State.scale
   const ihs = ih * State.scale
-  State.tx = Math.min(0, Math.max(vpW - iws, State.tx))
-  State.ty = Math.min(0, Math.max(vpH - ihs, State.ty))
+  if (iws <= vpW) { State.tx = (vpW - iws) / 2 }
+  else { State.tx = Math.min(0, Math.max(vpW - iws, State.tx)) }
+  if (ihs <= vpH) { State.ty = (vpH - ihs) / 2 }
+  else { State.ty = Math.min(0, Math.max(vpH - ihs, State.ty)) }
 
   document.getElementById('map-canvas').style.transition = 'transform 0.45s cubic-bezier(0.25,0.46,0.45,0.94)'
   document.getElementById('map-canvas').style.transform  = \`translate(\${State.tx}px,\${State.ty}px) scale(\${State.scale})\`
@@ -1564,5 +1570,550 @@ boot()
 </script>
 </body>
 </html>`
+
+// ── /master: 마스터 데이터 목록 (React SPA, localStorage 기반) ──────────────
+app.get('/master', (c) => {
+  return c.html(`<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>소화기 마스터 데이터 – 태경BK 단양1공장</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body { font-family: 'Pretendard', 'Apple SD Gothic Neo', sans-serif; background: #0f172a; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+    .row-replace { color: #ef4444 !important; font-weight: 600; }
+    .row-replace td { color: #ef4444 !important; }
+    .badge { display:inline-flex; align-items:center; padding:2px 8px; border-radius:9999px; font-size:11px; font-weight:600; white-space:nowrap; }
+    .badge-good    { background:#064e3b; color:#34d399; }
+    .badge-replace { background:#450a0a; color:#f87171; }
+    .badge-check   { background:#422006; color:#fb923c; }
+    .badge-normal  { background:#1e3a5f; color:#60a5fa; }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
+    .animate-in { animation: fadeIn 0.35s ease both; }
+    .table-row:hover { background: rgba(148,163,184,0.06) !important; }
+    input[type=text], input[type=date], select, textarea {
+      background:#1e293b; color:#e2e8f0; border:1px solid #334155;
+      border-radius:6px; padding:6px 10px; outline:none;
+    }
+    input[type=text]:focus, input[type=date]:focus, select:focus, textarea:focus {
+      border-color:#3b82f6; box-shadow:0 0 0 2px rgba(59,130,246,0.2);
+    }
+    .modal-overlay { position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:50;display:flex;align-items:center;justify-content:center; }
+    .modal-box { background:#1e293b;border:1px solid #334155;border-radius:12px;width:min(520px,95vw);max-height:90vh;overflow-y:auto;padding:28px 32px; }
+  </style>
+</head>
+<body class="min-h-screen text-slate-200">
+  <div id="root"></div>
+
+  <script type="text/babel">
+  const { useState, useEffect, useMemo, useCallback } = React;
+
+  // ═══════════════════════════════════════════════════════════════
+  //  상수 & 초기 데이터
+  // ═══════════════════════════════════════════════════════════════
+  const STORAGE_KEY = 'tkbk_extinguishers_master';
+  const REPLACE_MONTHS = 120;   // 10년
+  const INSPECT_DAYS   = 30;    // 30일
+
+  const INITIAL_DATA = [
+    { id:1,  location:'관리동 1층(현관)',          type:'ABC분말 3.3kg',  mfgYm:'2024.08', status:'정상', manager:'박광식', note:'' },
+    { id:2,  location:'관리동 1층(대표실)',         type:'ABC분말 3.3kg',  mfgYm:'2021.03', status:'정상', manager:'',      note:'' },
+    { id:3,  location:'관리동 경영지원',             type:'ABC분말 3.3kg',  mfgYm:'2024.08', status:'정상', manager:'',      note:'' },
+    { id:4,  location:'관리동 1층(흡연구역)',        type:'ABC분말 3.3kg',  mfgYm:'2023.01', status:'정상', manager:'',      note:'' },
+    { id:5,  location:'목욕탕(남)',                  type:'ABC분말 3.3kg',  mfgYm:'2018.05', status:'정상', manager:'',      note:'' },
+    { id:6,  location:'목욕탕(여)',                  type:'ABC분말 3.3kg',  mfgYm:'2018.05', status:'정상', manager:'',      note:'' },
+    { id:7,  location:'복지동 입구(1)',              type:'ABC분말 4.5kg',  mfgYm:'2020.01', status:'정상', manager:'',      note:'' },
+    { id:8,  location:'복지동 입구(2)',              type:'ABC분말 4.5kg',  mfgYm:'2022.03', status:'정상', manager:'',      note:'' },
+    { id:9,  location:'복지동(흡연구역)',             type:'ABC분말 3.3kg',  mfgYm:'2017.03', status:'정상', manager:'',      note:'' },
+    { id:10, location:'식당 홀(1)',                  type:'ABC분말 4.5kg',  mfgYm:'2017.03', status:'정상', manager:'',      note:'' },
+    { id:11, location:'식당 홀(2)',                  type:'ABC분말 4.5kg',  mfgYm:'2017.03', status:'정상', manager:'',      note:'' },
+    { id:12, location:'식당 주방(1)',                type:'하론 3kg',        mfgYm:'1999.01', status:'정상', manager:'',      note:'' },
+    { id:13, location:'식당 주방(2)',                type:'하론 3kg',        mfgYm:'1999.01', status:'정상', manager:'',      note:'' },
+    { id:14, location:'식당 주방(3)',                type:'자동확산 3kg',    mfgYm:'2021.02', status:'정상', manager:'',      note:'' },
+    { id:15, location:'식당 주방(4)',                type:'자동확산 3kg',    mfgYm:'2021.02', status:'정상', manager:'',      note:'눈금 확인 안됨' },
+    { id:16, location:'식당 주방(5)',                type:'K급(4L) 7.5kg',  mfgYm:'2017.07', status:'정상', manager:'',      note:'' },
+    { id:17, location:'복지동 회의실 1층',           type:'ABC분말 3.3kg',  mfgYm:'2017.03', status:'정상', manager:'',      note:'' },
+    { id:18, location:'복지동 2층 지회 사무실',      type:'ABC분말 3.3kg',  mfgYm:'2017.03', status:'정상', manager:'',      note:'' },
+    { id:19, location:'경비실(1)',                   type:'ABC분말 3.3kg',  mfgYm:'2023.01', status:'정상', manager:'',      note:'' },
+    { id:20, location:'경비실(2)',                   type:'ABC분말 3.3kg',  mfgYm:'2023.01', status:'정상', manager:'',      note:'' },
+  ];
+
+  // ═══════════════════════════════════════════════════════════════
+  //  유틸리티 함수
+  // ═══════════════════════════════════════════════════════════════
+
+  /** YYYY.MM → Date (해당 월 1일) */
+  function parseYm(ym) {
+    if (!ym) return null;
+    const [y, m] = ym.split('.');
+    if (!y || !m) return null;
+    return new Date(parseInt(y), parseInt(m) - 1, 1);
+  }
+
+  /** 제조년월로부터 경과 개월 수 */
+  function monthsElapsed(ym) {
+    const d = parseYm(ym);
+    if (!d) return 0;
+    const now = new Date();
+    return (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth());
+  }
+
+  /** 마지막 점검일로부터 경과 일 수 */
+  function daysElapsed(dateStr) {
+    if (!dateStr) return 9999;
+    const diff = Date.now() - new Date(dateStr).getTime();
+    return Math.floor(diff / 86400000);
+  }
+
+  /** 표시용 상태 계산 */
+  function calcDisplayStatus(item) {
+    const mo = monthsElapsed(item.mfgYm);
+    if (mo >= REPLACE_MONTHS) return 'replace';
+    const days = daysElapsed(item.lastInspectionDate);
+    if (days >= INSPECT_DAYS) return 'check';
+    return 'good';
+  }
+
+  /** 오늘 기준 랜덤 날짜(0~60일 전) 생성 */
+  function randomRecentDate() {
+    const d = new Date();
+    d.setDate(d.getDate() - Math.floor(Math.random() * 60));
+    return d.toISOString().slice(0, 10);
+  }
+
+  /** localStorage 초기화 (최초 1회) */
+  function initStorage() {
+    const existing = localStorage.getItem(STORAGE_KEY);
+    if (existing) {
+      try { return JSON.parse(existing); } catch { /* fall through */ }
+    }
+    const seeded = INITIAL_DATA.map(item => ({
+      ...item,
+      lastInspectionDate: randomRecentDate(),
+    }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+    return seeded;
+  }
+
+  function saveStorage(data) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  백엔드 연동용 빈 함수 (나중에 Spring Boot API 호출로 교체)
+  // ═══════════════════════════════════════════════════════════════
+  const API = {
+    async fetchAll()          { return null; /* TODO: GET /api/extinguishers */ },
+    async createItem(item)    { return null; /* TODO: POST /api/extinguishers */ },
+    async updateItem(id,item) { return null; /* TODO: PUT /api/extinguishers/{id} */ },
+    async deleteItem(id)      { return null; /* TODO: DELETE /api/extinguishers/{id} */ },
+  };
+
+  // ═══════════════════════════════════════════════════════════════
+  //  StatusBadge 컴포넌트
+  // ═══════════════════════════════════════════════════════════════
+  function StatusBadge({ item }) {
+    const st = calcDisplayStatus(item);
+    if (st === 'replace') return <span className="badge badge-replace"><i className="fas fa-triangle-exclamation mr-1"></i>교체대상</span>;
+    if (st === 'check')   return <span className="badge badge-check"><i className="fas fa-clock mr-1"></i>점검 필요</span>;
+    return <span className="badge badge-good"><i className="fas fa-circle-check mr-1"></i>양호</span>;
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  요약 카드
+  // ═══════════════════════════════════════════════════════════════
+  function SummaryCards({ items }) {
+    const total   = items.length;
+    const replace = items.filter(i => calcDisplayStatus(i) === 'replace').length;
+    const check   = items.filter(i => calcDisplayStatus(i) === 'check').length;
+    const good    = total - replace - check;
+
+    const cards = [
+      { label:'전체 소화기',  value:total,   icon:'fa-fire-extinguisher', color:'from-blue-600 to-blue-800',   textColor:'text-blue-200',   valueColor:'text-white' },
+      { label:'양호',         value:good,    icon:'fa-circle-check',       color:'from-emerald-600 to-emerald-800', textColor:'text-emerald-200', valueColor:'text-white' },
+      { label:'교체 대상',    value:replace, icon:'fa-triangle-exclamation',color:'from-red-700 to-red-900',     textColor:'text-red-200',    valueColor:'text-white' },
+    ];
+
+    return (
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        {cards.map((c, i) => (
+          <div key={i} className={"rounded-xl p-5 bg-gradient-to-br " + c.color + " shadow-lg animate-in"} style={{animationDelay: i*0.07+'s'}}>
+            <div className="flex items-center justify-between mb-2">
+              <span className={"text-sm font-medium " + c.textColor}>{c.label}</span>
+              <i className={"fas " + c.icon + " text-lg opacity-70 " + c.textColor}></i>
+            </div>
+            <div className={"text-3xl font-bold " + c.valueColor}>{c.value}<span className="text-base font-normal ml-1 opacity-70">개</span></div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  편집 모달
+  // ═══════════════════════════════════════════════════════════════
+  function EditModal({ item, onSave, onClose }) {
+    const isNew = !item.id;
+    const [form, setForm] = useState({
+      location: item.location || '',
+      type:     item.type     || '',
+      mfgYm:    item.mfgYm    || '',
+      status:   item.status   || '정상',
+      manager:  item.manager  || '',
+      note:     item.note     || '',
+      lastInspectionDate: item.lastInspectionDate || new Date().toISOString().slice(0,10),
+    });
+
+    const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+    function handleSubmit(e) {
+      e.preventDefault();
+      if (!form.location.trim()) { alert('설치 위치를 입력하세요.'); return; }
+      if (!form.type.trim())     { alert('소화기 종류를 입력하세요.'); return; }
+      if (!form.mfgYm.match(/^\\d{4}\\.\\d{2}$/)) { alert('제조년월을 YYYY.MM 형식으로 입력하세요.'); return; }
+      onSave(form);
+    }
+
+    const fields = [
+      { label:'설치 위치 *', key:'location', type:'text', placeholder:'예) 관리동 1층(현관)' },
+      { label:'소화기 종류 *', key:'type',  type:'text', placeholder:'예) ABC분말 3.3kg' },
+      { label:'제조년월 * (YYYY.MM)', key:'mfgYm', type:'text', placeholder:'예) 2023.06' },
+      { label:'담당자', key:'manager', type:'text', placeholder:'예) 홍길동' },
+      { label:'최근 점검일', key:'lastInspectionDate', type:'date', placeholder:'' },
+    ];
+
+    return (
+      <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+        <div className="modal-box animate-in">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-bold text-white">
+              <i className={"fas " + (isNew ? "fa-plus-circle text-blue-400" : "fa-pen-to-square text-amber-400") + " mr-2"}></i>
+              {isNew ? '소화기 추가' : '소화기 정보 수정'}
+            </h2>
+            <button onClick={onClose} className="text-slate-400 hover:text-white transition text-xl"><i className="fas fa-xmark"></i></button>
+          </div>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {fields.map(f => (
+              <div key={f.key}>
+                <label className="block text-xs text-slate-400 mb-1">{f.label}</label>
+                <input type={f.type} value={form[f.key]} onChange={e => set(f.key, e.target.value)}
+                  placeholder={f.placeholder} className="w-full" />
+              </div>
+            ))}
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">비고</label>
+              <textarea value={form.note} onChange={e => set('note', e.target.value)}
+                rows={2} className="w-full resize-none" placeholder="특이사항 입력" />
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-lg transition">
+                <i className="fas fa-check mr-2"></i>{isNew ? '추가' : '저장'}
+              </button>
+              <button type="button" onClick={onClose} className="flex-1 bg-slate-600 hover:bg-slate-500 text-white font-semibold py-2.5 rounded-lg transition">
+                취소
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  삭제 확인 모달
+  // ═══════════════════════════════════════════════════════════════
+  function DeleteModal({ item, onConfirm, onClose }) {
+    return (
+      <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+        <div className="modal-box animate-in" style={{maxWidth:360}}>
+          <div className="text-center mb-6">
+            <div className="w-14 h-14 bg-red-900 rounded-full flex items-center justify-center mx-auto mb-4">
+              <i className="fas fa-trash text-red-400 text-xl"></i>
+            </div>
+            <p className="text-white font-semibold text-base mb-1">소화기를 삭제할까요?</p>
+            <p className="text-slate-400 text-sm">"{item.location}" 항목이 영구 삭제됩니다.</p>
+          </div>
+          <div className="flex gap-3">
+            <button onClick={onConfirm} className="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold py-2.5 rounded-lg transition">
+              <i className="fas fa-trash mr-2"></i>삭제
+            </button>
+            <button onClick={onClose} className="flex-1 bg-slate-600 hover:bg-slate-500 text-white font-semibold py-2.5 rounded-lg transition">취소</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  메인 앱
+  // ═══════════════════════════════════════════════════════════════
+  function App() {
+    const [items,    setItems]    = useState([]);
+    const [search,   setSearch]   = useState('');
+    const [filter,   setFilter]   = useState('all');  // all | good | replace | check
+    const [editItem, setEditItem] = useState(null);   // null | {} | item
+    const [delItem,  setDelItem]  = useState(null);
+    const [toast,    setToast]    = useState(null);
+
+    // 초기 로드
+    useEffect(() => { setItems(initStorage()); }, []);
+
+    // 토스트
+    const showToast = useCallback((msg, type='success') => {
+      setToast({ msg, type });
+      setTimeout(() => setToast(null), 2800);
+    }, []);
+
+    // 필터 + 검색
+    const filtered = useMemo(() => {
+      return items.filter(item => {
+        const st = calcDisplayStatus(item);
+        if (filter === 'good'    && st !== 'good')    return false;
+        if (filter === 'replace' && st !== 'replace') return false;
+        if (filter === 'check'   && st !== 'check')   return false;
+        if (!search.trim()) return true;
+        const q = search.toLowerCase();
+        return (item.location||'').toLowerCase().includes(q)
+            || (item.type||'').toLowerCase().includes(q)
+            || (item.manager||'').toLowerCase().includes(q)
+            || (item.note||'').toLowerCase().includes(q);
+      });
+    }, [items, search, filter]);
+
+    // CRUD
+    function handleAdd() {
+      setEditItem({});
+    }
+
+    function handleEdit(item) {
+      setEditItem(item);
+    }
+
+    function handleSave(form) {
+      let updated;
+      if (!editItem.id) {
+        // 신규
+        const newId = Math.max(0, ...items.map(i => i.id)) + 1;
+        const newItem = { ...form, id: newId };
+        updated = [...items, newItem];
+        showToast('소화기가 추가되었습니다.', 'success');
+      } else {
+        // 수정
+        updated = items.map(i => i.id === editItem.id ? { ...i, ...form } : i);
+        showToast('수정되었습니다.', 'success');
+      }
+      saveStorage(updated);
+      setItems(updated);
+      setEditItem(null);
+      API.createItem(form); // Spring Boot 연동 시 교체
+    }
+
+    function handleDelete(item) {
+      setDelItem(item);
+    }
+
+    function confirmDelete() {
+      const updated = items.filter(i => i.id !== delItem.id);
+      saveStorage(updated);
+      setItems(updated);
+      setDelItem(null);
+      showToast('삭제되었습니다.', 'error');
+    }
+
+    function handleReset() {
+      if (!confirm('초기 데이터로 리셋하시겠습니까? 현재 데이터가 모두 삭제됩니다.')) return;
+      const seeded = INITIAL_DATA.map(item => ({ ...item, lastInspectionDate: randomRecentDate() }));
+      saveStorage(seeded);
+      setItems(seeded);
+      showToast('초기 데이터로 리셋되었습니다.', 'success');
+    }
+
+    const FILTER_OPTS = [
+      { v:'all',     label:'전체' },
+      { v:'good',    label:'양호' },
+      { v:'check',   label:'점검 필요' },
+      { v:'replace', label:'교체 대상' },
+    ];
+
+    return (
+      <div className="min-h-screen bg-slate-900 text-slate-200">
+        {/* 상단 헤더 */}
+        <header className="bg-slate-950 border-b border-slate-800 px-6 py-4 sticky top-0 z-30">
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <a href="/" className="text-slate-400 hover:text-white transition text-sm mr-2">
+                <i className="fas fa-arrow-left"></i>
+              </a>
+              <div className="w-9 h-9 bg-red-600 rounded-lg flex items-center justify-center">
+                <i className="fas fa-fire-extinguisher text-white text-base"></i>
+              </div>
+              <div>
+                <h1 className="font-bold text-white text-base leading-tight">태경BK 단양1공장</h1>
+                <p className="text-slate-400 text-xs">소화기 마스터 데이터 관리</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={handleReset}
+                className="text-xs text-slate-400 hover:text-slate-200 border border-slate-700 hover:border-slate-500 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
+                <i className="fas fa-rotate-left"></i><span className="hidden sm:inline">초기화</span>
+              </button>
+              <button onClick={handleAdd}
+                className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2 shadow">
+                <i className="fas fa-plus"></i>소화기 추가
+              </button>
+            </div>
+          </div>
+        </header>
+
+        {/* 본문 */}
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+
+          {/* 요약 카드 */}
+          <SummaryCards items={items} />
+
+          {/* 검색 + 필터 바 */}
+          <div className="flex flex-col sm:flex-row gap-3 mb-4">
+            <div className="relative flex-1">
+              <i className="fas fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+              <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="위치, 종류, 담당자 검색..." className="w-full pl-9 pr-4 py-2 text-sm" />
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              {FILTER_OPTS.map(o => (
+                <button key={o.v} onClick={() => setFilter(o.v)}
+                  className={"text-xs font-medium px-3 py-2 rounded-lg border transition " +
+                    (filter === o.v
+                      ? 'bg-blue-600 border-blue-500 text-white'
+                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500')}>
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 결과 수 */}
+          <div className="text-xs text-slate-500 mb-2 ml-1">
+            {filtered.length}개 항목
+            {(search || filter !== 'all') && <span className="ml-1">(전체 {items.length}개 중 필터)</span>}
+          </div>
+
+          {/* 테이블 */}
+          <div className="rounded-xl border border-slate-700 overflow-hidden shadow-xl">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="bg-slate-800 text-slate-400 text-xs uppercase tracking-wide">
+                    <th className="px-4 py-3 text-center w-10">No.</th>
+                    <th className="px-4 py-3 text-left">설치 위치</th>
+                    <th className="px-4 py-3 text-left">소화기 종류</th>
+                    <th className="px-4 py-3 text-center">제조년월</th>
+                    <th className="px-4 py-3 text-center">경과(월)</th>
+                    <th className="px-4 py-3 text-center">최근 점검일</th>
+                    <th className="px-4 py-3 text-center">상태</th>
+                    <th className="px-4 py-3 text-center">담당자</th>
+                    <th className="px-4 py-3 text-left">비고</th>
+                    <th className="px-4 py-3 text-center w-20">관리</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} className="text-center py-16 text-slate-500">
+                        <i className="fas fa-inbox text-3xl mb-3 block opacity-40"></i>
+                        검색 결과가 없습니다.
+                      </td>
+                    </tr>
+                  ) : filtered.map((item, idx) => {
+                    const st      = calcDisplayStatus(item);
+                    const mo      = monthsElapsed(item.mfgYm);
+                    const isRepl  = st === 'replace';
+                    const rowCls  = "table-row border-t border-slate-800 transition-colors " + (isRepl ? "bg-red-950/30" : idx % 2 === 0 ? "bg-slate-900" : "bg-slate-900/50");
+                    const cellCls = isRepl ? "text-red-400" : "text-slate-300";
+                    return (
+                      <tr key={item.id} className={rowCls}>
+                        <td className={"px-4 py-3 text-center text-slate-500 text-xs " + (isRepl ? "text-red-500" : "")}>{item.id}</td>
+                        <td className={"px-4 py-3 font-medium " + (isRepl ? "text-red-400 font-semibold" : "text-slate-100")}>
+                          {item.location || '-'}
+                        </td>
+                        <td className={"px-4 py-3 " + cellCls}>{item.type || '-'}</td>
+                        <td className={"px-4 py-3 text-center " + cellCls}>{item.mfgYm || '-'}</td>
+                        <td className={"px-4 py-3 text-center font-mono " + (mo >= REPLACE_MONTHS ? "text-red-400 font-bold" : mo >= 90 ? "text-amber-400" : "text-slate-300")}>
+                          {mo}
+                        </td>
+                        <td className={"px-4 py-3 text-center " + (daysElapsed(item.lastInspectionDate) >= INSPECT_DAYS ? "text-amber-400" : "text-slate-300")}>
+                          {item.lastInspectionDate || '-'}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <StatusBadge item={item} />
+                        </td>
+                        <td className={"px-4 py-3 text-center " + cellCls}>{item.manager || <span className="text-slate-600">-</span>}</td>
+                        <td className={"px-4 py-3 max-w-[140px] truncate text-xs " + (item.note ? "text-amber-300" : "text-slate-600")}>
+                          {item.note || '-'}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => handleEdit(item)}
+                              className="text-slate-400 hover:text-blue-400 transition p-1.5 rounded hover:bg-blue-900/30" title="수정">
+                              <i className="fas fa-pen text-xs"></i>
+                            </button>
+                            <button onClick={() => handleDelete(item)}
+                              className="text-slate-400 hover:text-red-400 transition p-1.5 rounded hover:bg-red-900/30" title="삭제">
+                              <i className="fas fa-trash text-xs"></i>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* 범례 */}
+          <div className="mt-4 flex flex-wrap gap-4 text-xs text-slate-500">
+            <span><i className="fas fa-circle-check text-emerald-400 mr-1"></i>양호: 점검일 30일 미경과 &amp; 제조 120개월 미만</span>
+            <span><i className="fas fa-clock text-amber-400 mr-1"></i>점검 필요: 최근 점검일로부터 30일 이상 경과</span>
+            <span><i className="fas fa-triangle-exclamation text-red-400 mr-1"></i>교체 대상: 제조 후 120개월(10년) 이상 경과 → 빨간색 강조</span>
+          </div>
+        </main>
+
+        {/* 모달 */}
+        {editItem !== null && (
+          <EditModal item={editItem} onSave={handleSave} onClose={() => setEditItem(null)} />
+        )}
+        {delItem && (
+          <DeleteModal item={delItem} onConfirm={confirmDelete} onClose={() => setDelItem(null)} />
+        )}
+
+        {/* 토스트 */}
+        {toast && (
+          <div className={"fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl shadow-2xl text-sm font-medium flex items-center gap-2 animate-in z-50 " +
+            (toast.type === 'success' ? "bg-emerald-700 text-white" : "bg-red-700 text-white")}>
+            <i className={"fas " + (toast.type === 'success' ? "fa-circle-check" : "fa-circle-xmark")}></i>
+            {toast.msg}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  마운트
+  // ═══════════════════════════════════════════════════════════════
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(<App />);
+  </script>
+</body>
+</html>`)
+})
 
 export default app
