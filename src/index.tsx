@@ -1585,33 +1585,33 @@ app.get('/master', (c) => {
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
-    body { font-family: 'Pretendard', 'Apple SD Gothic Neo', sans-serif; background: #0f172a; }
+    body { font-family: 'Pretendard', 'Apple SD Gothic Neo', sans-serif; background: #f1f5f9; color: #1e293b; }
     ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #1e293b; }
-    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
-    .row-replace { color: #ef4444 !important; font-weight: 600; }
-    .row-replace td { color: #ef4444 !important; }
+    ::-webkit-scrollbar-track { background: #e2e8f0; }
+    ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 3px; }
+    .row-replace { color: #dc2626 !important; font-weight: 600; }
+    .row-replace td { color: #dc2626 !important; }
     .badge { display:inline-flex; align-items:center; padding:2px 8px; border-radius:9999px; font-size:11px; font-weight:600; white-space:nowrap; }
-    .badge-good    { background:#064e3b; color:#34d399; }
-    .badge-replace { background:#450a0a; color:#f87171; }
-    .badge-check   { background:#422006; color:#fb923c; }
-    .badge-defect  { background:#450a0a; color:#f87171; }
-    .badge-normal  { background:#1e3a5f; color:#60a5fa; }
+    .badge-good    { background:#dcfce7; color:#15803d; }
+    .badge-replace { background:#fee2e2; color:#dc2626; }
+    .badge-check   { background:#ffedd5; color:#c2410c; }
+    .badge-defect  { background:#f3e8ff; color:#7e22ce; }
+    .badge-normal  { background:#dbeafe; color:#1d4ed8; }
     @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
     .animate-in { animation: fadeIn 0.35s ease both; }
-    .table-row:hover { background: rgba(148,163,184,0.06) !important; }
+    .table-row:hover { background: #f8fafc !important; }
     input[type=text], input[type=date], select, textarea {
-      background:#1e293b; color:#e2e8f0; border:1px solid #334155;
+      background:#ffffff; color:#1e293b; border:1px solid #cbd5e1;
       border-radius:6px; padding:6px 10px; outline:none;
     }
     input[type=text]:focus, input[type=date]:focus, select:focus, textarea:focus {
-      border-color:#3b82f6; box-shadow:0 0 0 2px rgba(59,130,246,0.2);
+      border-color:#3b82f6; box-shadow:0 0 0 2px rgba(59,130,246,0.15);
     }
-    .modal-overlay { position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:50;display:flex;align-items:center;justify-content:center; }
-    .modal-box { background:#1e293b;border:1px solid #334155;border-radius:12px;width:min(520px,95vw);max-height:90vh;overflow-y:auto;padding:28px 32px; }
+    .modal-overlay { position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:50;display:flex;align-items:center;justify-content:center; }
+    .modal-box { background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;width:min(520px,95vw);max-height:90vh;overflow-y:auto;padding:28px 32px; }
   </style>
 </head>
-<body class="min-h-screen text-slate-200">
+<body class="min-h-screen text-gray-800">
   <div id="root"></div>
 
   <script type="text/babel">
@@ -1931,7 +1931,7 @@ app.get('/master', (c) => {
                 + c.color
                 + " cursor-pointer select-none transition-all duration-200 "
                 + "hover:opacity-90 hover:-translate-y-1 hover:shadow-xl "
-                + (isActive ? "ring-2 ring-offset-2 ring-offset-slate-900 " + c.ring : "")
+                + (isActive ? "ring-2 ring-offset-2 ring-offset-white " + c.ring : "")
               }
               style={{animationDelay: i*0.07+'s'}}
             >
@@ -1991,22 +1991,22 @@ app.get('/master', (c) => {
       <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
         <div className="modal-box animate-in">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-bold text-white">
-              <i className={"fas " + (isNew ? "fa-plus-circle text-blue-400" : "fa-pen-to-square text-amber-400") + " mr-2"}></i>
+            <h2 className="text-lg font-bold text-gray-800">
+              <i className={"fas " + (isNew ? "fa-plus-circle text-blue-500" : "fa-pen-to-square text-amber-500") + " mr-2"}></i>
               {isNew ? '소화기 추가' : '소화기 정보 수정'}
             </h2>
-            <button onClick={onClose} className="text-slate-400 hover:text-white transition text-xl"><i className="fas fa-xmark"></i></button>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-700 transition text-xl"><i className="fas fa-xmark"></i></button>
           </div>
           <form onSubmit={handleSubmit} className="space-y-4">
             {fields.map(f => (
               <div key={f.key}>
-                <label className="block text-xs text-slate-400 mb-1">{f.label}</label>
+                <label className="block text-xs text-gray-500 mb-1">{f.label}</label>
                 <input type={f.type} value={form[f.key]} onChange={e => set(f.key, e.target.value)}
                   placeholder={f.placeholder} className="w-full" />
               </div>
             ))}
             <div>
-              <label className="block text-xs text-slate-400 mb-1">비고</label>
+              <label className="block text-xs text-gray-500 mb-1">비고</label>
               <textarea value={form.note} onChange={e => set('note', e.target.value)}
                 rows={2} className="w-full resize-none" placeholder="특이사항 입력" />
             </div>
@@ -2014,7 +2014,7 @@ app.get('/master', (c) => {
               <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-lg transition">
                 <i className="fas fa-check mr-2"></i>{isNew ? '추가' : '저장'}
               </button>
-              <button type="button" onClick={onClose} className="flex-1 bg-slate-600 hover:bg-slate-500 text-white font-semibold py-2.5 rounded-lg transition">
+              <button type="button" onClick={onClose} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 rounded-lg border border-gray-300 transition">
                 취소
               </button>
             </div>
@@ -2032,17 +2032,17 @@ app.get('/master', (c) => {
       <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
         <div className="modal-box animate-in" style={{maxWidth:360}}>
           <div className="text-center mb-6">
-            <div className="w-14 h-14 bg-red-900 rounded-full flex items-center justify-center mx-auto mb-4">
-              <i className="fas fa-trash text-red-400 text-xl"></i>
+            <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <i className="fas fa-trash text-red-500 text-xl"></i>
             </div>
-            <p className="text-white font-semibold text-base mb-1">소화기를 삭제할까요?</p>
-            <p className="text-slate-400 text-sm">"{item.location}" 항목이 영구 삭제됩니다.</p>
+            <p className="text-gray-800 font-semibold text-base mb-1">소화기를 삭제할까요?</p>
+            <p className="text-gray-500 text-sm">"{item.location}" 항목이 영구 삭제됩니다.</p>
           </div>
           <div className="flex gap-3">
             <button onClick={onConfirm} className="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold py-2.5 rounded-lg transition">
               <i className="fas fa-trash mr-2"></i>삭제
             </button>
-            <button onClick={onClose} className="flex-1 bg-slate-600 hover:bg-slate-500 text-white font-semibold py-2.5 rounded-lg transition">취소</button>
+            <button onClick={onClose} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 rounded-lg border border-gray-300 transition">취소</button>
           </div>
         </div>
       </div>
@@ -2077,27 +2077,27 @@ app.get('/master', (c) => {
           {/* 헤더 */}
           <div className="flex items-start justify-between mb-1">
             <div>
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <i className="fas fa-clipboard-check text-blue-400"></i>
+              <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                <i className="fas fa-clipboard-check text-blue-500"></i>
                 소화기 점검
               </h2>
-              <p className="text-slate-400 text-xs mt-1">
+              <p className="text-gray-500 text-xs mt-1">
                 항목별로 정상 여부를 선택하면 점검 결과가 자동으로 갱신됩니다.
               </p>
             </div>
-            <button onClick={onClose} className="text-slate-400 hover:text-white transition text-xl ml-4 mt-0.5">
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-700 transition text-xl ml-4 mt-0.5">
               <i className="fas fa-xmark"></i>
             </button>
           </div>
 
           {/* 소화기 정보 */}
-          <div className="bg-slate-800 rounded-lg px-4 py-3 mb-5 mt-4 flex items-center gap-3">
-            <div className="w-8 h-8 bg-red-700 rounded-full flex items-center justify-center shrink-0">
+          <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 mb-5 mt-4 flex items-center gap-3">
+            <div className="w-8 h-8 bg-red-500 rounded-full flex items-center justify-center shrink-0">
               <i className="fas fa-fire-extinguisher text-white text-sm"></i>
             </div>
             <div>
-              <div className="text-sm font-semibold text-white">{item.location || '-'}</div>
-              <div className="text-xs text-slate-400">{item.type || '-'} &nbsp;·&nbsp; 제조 {item.mfgYm || '-'} &nbsp;·&nbsp; BK-FE-{String(item.id).padStart(3,'0')}</div>
+              <div className="text-sm font-semibold text-gray-800">{item.location || '-'}</div>
+              <div className="text-xs text-gray-500">{item.type || '-'} &nbsp;·&nbsp; 제조 {item.mfgYm || '-'} &nbsp;·&nbsp; BK-FE-{String(item.id).padStart(3,'0')}</div>
             </div>
           </div>
 
@@ -2107,22 +2107,22 @@ app.get('/master', (c) => {
               <div key={ci.key}
                 className={"rounded-lg border px-4 py-3 flex items-center justify-between transition-colors "
                   + (results[ci.key] === false
-                    ? "border-red-600 bg-red-950/40"
-                    : "border-slate-700 bg-slate-800/60")}>
+                    ? "border-red-300 bg-red-50"
+                    : "border-gray-200 bg-gray-50")}>
                 <div className="flex items-center gap-2.5">
                   <span className={"w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0 "
-                    + (results[ci.key] === false ? "bg-red-600 text-white" : "bg-slate-600 text-slate-300")}>
+                    + (results[ci.key] === false ? "bg-red-500 text-white" : "bg-gray-200 text-gray-600")}>
                     {idx + 1}
                   </span>
-                  <span className={"text-sm " + (results[ci.key] === false ? "text-red-300" : "text-slate-200")}>
+                  <span className={"text-sm " + (results[ci.key] === false ? "text-red-600" : "text-gray-700")}>
                     {ci.label}
                   </span>
                 </div>
                 <div className="flex gap-2 shrink-0 ml-3">
                   <label className={"flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer border text-xs font-semibold transition-colors "
                     + (results[ci.key] === true
-                      ? "bg-emerald-700 border-emerald-500 text-white"
-                      : "bg-slate-700 border-slate-600 text-slate-400 hover:border-emerald-600")}>
+                      ? "bg-emerald-600 border-emerald-500 text-white"
+                      : "bg-gray-100 border-gray-300 text-gray-500 hover:border-emerald-500")}>
                     <input type="radio" name={ci.key} className="hidden"
                       checked={results[ci.key] === true}
                       onChange={() => setResults(r => ({...r, [ci.key]: true}))} />
@@ -2130,8 +2130,8 @@ app.get('/master', (c) => {
                   </label>
                   <label className={"flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer border text-xs font-semibold transition-colors "
                     + (results[ci.key] === false
-                      ? "bg-red-700 border-red-500 text-white"
-                      : "bg-slate-700 border-slate-600 text-slate-400 hover:border-red-600")}>
+                      ? "bg-red-600 border-red-500 text-white"
+                      : "bg-gray-100 border-gray-300 text-gray-500 hover:border-red-400")}>
                     <input type="radio" name={ci.key} className="hidden"
                       checked={results[ci.key] === false}
                       onChange={() => setResults(r => ({...r, [ci.key]: false}))} />
@@ -2160,7 +2160,7 @@ app.get('/master', (c) => {
               점검 완료
             </button>
             <button onClick={onClose}
-              className="flex-1 bg-slate-600 hover:bg-slate-500 text-white font-semibold py-2.5 rounded-lg transition">
+              className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 rounded-lg border border-gray-300 transition">
               취소
             </button>
           </div>
@@ -2201,9 +2201,8 @@ app.get('/master', (c) => {
     const filtered = useMemo(() => {
       return items.filter(item => {
         const st = calcDisplayStatus(item);
-        if (filter === 'good'    && st !== 'good')    return false;
-        if (filter === 'replace' && st !== 'replace') return false;
-        if (filter === 'check'   && st !== 'check')   return false;
+        // 상태 필터 (defect 포함 모든 탭 정확히 매칭)
+        if (filter !== 'all' && st !== filter) return false;
         if (!search.trim()) return true;
         const q = search.toLowerCase();
         return (item.location||'').toLowerCase().includes(q)
@@ -2279,52 +2278,48 @@ app.get('/master', (c) => {
     }
 
     return (
-      <div className="min-h-screen bg-slate-900 text-slate-200">
+      <div className="min-h-screen bg-gray-50 text-gray-800">
         {/* ── GNB ── */}
-        <header className="bg-slate-950 border-b border-slate-800 sticky top-0 z-30">
+        <header className="bg-white border-b border-gray-200 sticky top-0 z-30 shadow-sm">
           {/* 1행: 로고 + 시스템명 + 우측 액션 */}
           <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
-            {/* 좌: 로고 + BKMS */}
+            {/* 좌: 로고 */}
             <div className="flex items-center gap-3">
-              <a href="/" className="text-slate-500 hover:text-slate-300 transition text-sm">
+              <a href="/" className="text-gray-400 hover:text-gray-600 transition text-sm">
                 <i className="fas fa-arrow-left"></i>
               </a>
-              <div className="flex items-center gap-2.5">
-                {/* 임시 로고 아이콘 */}
-                <div className="w-8 h-8 rounded-md bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow">
-                  <i className="fas fa-shield-halved text-white text-sm"></i>
-                </div>
-                <span className="text-xl font-extrabold tracking-tight text-white">BKMS</span>
-                <span className="hidden sm:block text-slate-600 text-sm ml-1">|</span>
-                <span className="hidden sm:block text-slate-400 text-xs">태경비케이 단양1공장</span>
+              <div className="flex items-center gap-3">
+                <img src="/static/tkbk-logo.png" alt="TAEKYUNG BK" className="h-8 object-contain" />
+                <span className="hidden sm:block text-gray-300 text-sm">|</span>
+                <span className="hidden sm:block text-gray-500 text-xs font-medium">단양1공장 설비관리시스템</span>
               </div>
             </div>
             {/* 우: 액션 버튼 (소화기 탭일 때만) */}
             {activeTab === 'extinguisher' && (
               <div className="flex items-center gap-2">
                 <button onClick={handleReset}
-                  className="text-xs text-slate-400 hover:text-slate-200 border border-slate-700 hover:border-slate-500 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
+                  className="text-xs text-gray-500 hover:text-gray-700 border border-gray-300 hover:border-gray-400 bg-white px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
                   <i className="fas fa-rotate-left"></i>
                   <span className="hidden sm:inline">초기화</span>
                 </button>
                 <button onClick={handleAdd}
-                  className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2 shadow">
+                  className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2 shadow-sm">
                   <i className="fas fa-plus"></i>소화기 추가
                 </button>
               </div>
             )}
           </div>
           {/* 2행: 메인 메뉴 탭 */}
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-end gap-0 border-t border-slate-800">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-end gap-0 border-t border-gray-100">
             {TABS.map(tab => (
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
                 className={
-                  "px-5 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 "
+                  "px-5 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap "
                   + (activeTab === tab.key
-                    ? "border-blue-400 text-blue-300"
-                    : "border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-500")
+                    ? "border-blue-500 text-blue-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")
                 }>
                 <i className={"fas " + tab.icon + " text-xs"}></i>
                 {tab.label}
@@ -2335,7 +2330,7 @@ app.get('/master', (c) => {
 
         {/* ── 탭별 본문 ── */}
         {activeTab !== 'extinguisher' ? (
-          <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-slate-500">
+          <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-gray-400">
             <i className="fas fa-screwdriver-wrench text-5xl opacity-30"></i>
             <p className="text-lg font-medium">준비 중인 화면입니다.</p>
             <p className="text-sm opacity-60">{TABS.find(t=>t.key===activeTab)?.label} 기능은 현재 개발 중입니다.</p>
@@ -2349,41 +2344,41 @@ app.get('/master', (c) => {
           {/* 검색 바 */}
           <div className="flex mb-4">
             <div className="relative flex-1 max-w-md">
-              <i className="fas fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+              <i className="fas fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none"></i>
               <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-                placeholder="위치, 종류, 담당자 검색..." className="w-full pl-9 pr-4 py-2 text-sm" />
+                placeholder="위치, 종류, 담당자 검색..." className="w-full pl-10 pr-4 py-2 text-sm" />
             </div>
           </div>
 
           {/* 결과 수 */}
-          <div className="text-xs text-slate-500 mb-2 ml-1">
+          <div className="text-xs text-gray-400 mb-2 ml-1">
             {filtered.length}개 항목
             {(search || filter !== 'all') && <span className="ml-1">(전체 {items.length}개 중 필터)</span>}
           </div>
 
           {/* 테이블 */}
-          <div className="rounded-xl border border-slate-700 overflow-hidden shadow-xl">
+          <div className="rounded-xl border border-gray-200 overflow-hidden shadow-sm bg-white">
             <div className="overflow-x-auto">
               <table className="w-full text-sm border-collapse">
                 <thead>
-                  <tr className="bg-slate-800 text-slate-400 text-xs uppercase tracking-wide">
-                    <th className="px-4 py-3 text-center w-10">No.</th>
-                    <th className="px-4 py-3 text-center">고유 번호</th>
-                    <th className="px-4 py-3 text-left">설치 위치</th>
-                    <th className="px-4 py-3 text-left">소화기 종류</th>
-                    <th className="px-4 py-3 text-center">제조년월</th>
-                    <th className="px-4 py-3 text-center">교체 년월</th>
-                    <th className="px-4 py-3 text-center">최근 점검일</th>
-                    <th className="px-4 py-3 text-center">상태</th>
-                    <th className="px-4 py-3 text-center">담당자</th>
-                    <th className="px-4 py-3 text-left">비고</th>
-                    <th className="px-4 py-3 text-center w-20">관리</th>
+                  <tr className="bg-gray-100 text-gray-500 text-xs uppercase tracking-wide border-b border-gray-200">
+                    <th className="px-4 py-3 text-center w-10 whitespace-nowrap">No.</th>
+                    <th className="px-4 py-3 text-center whitespace-nowrap">고유 번호</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">설치 위치</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">소화기 종류</th>
+                    <th className="px-4 py-3 text-center whitespace-nowrap">제조년월</th>
+                    <th className="px-4 py-3 text-center whitespace-nowrap">교체 년월</th>
+                    <th className="px-4 py-3 text-center whitespace-nowrap">최근 점검일</th>
+                    <th className="px-4 py-3 text-center whitespace-nowrap">상태</th>
+                    <th className="px-4 py-3 text-center whitespace-nowrap">담당자</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">비고</th>
+                    <th className="px-4 py-3 text-center w-24 whitespace-nowrap">관리</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="text-center py-16 text-slate-500">
+                      <td colSpan={11} className="text-center py-16 text-gray-400">
                         <i className="fas fa-inbox text-3xl mb-3 block opacity-40"></i>
                         검색 결과가 없습니다.
                       </td>
@@ -2392,44 +2387,44 @@ app.get('/master', (c) => {
                     const st      = calcDisplayStatus(item);
                     const mo      = monthsElapsed(item.mfgYm);
                     const isRepl  = st === 'replace';
-                    const rowCls  = "table-row border-t border-slate-800 transition-colors " + (isRepl ? "bg-red-950/30" : idx % 2 === 0 ? "bg-slate-900" : "bg-slate-900/50");
-                    const cellCls = isRepl ? "text-red-400" : "text-slate-300";
+                    const rowCls  = "table-row border-t border-gray-100 transition-colors " + (isRepl ? "bg-red-50" : idx % 2 === 0 ? "bg-white" : "bg-gray-50/50");
+                    const cellCls = isRepl ? "text-red-600" : "text-gray-700";
                     return (
                       <tr key={item.id} className={rowCls}>
-                        <td className={"px-4 py-3 text-center text-slate-500 text-xs " + (isRepl ? "text-red-500" : "")}>{item.id}</td>
-                        <td className={"px-4 py-3 text-center font-mono text-xs " + (isRepl ? "text-red-400" : "text-slate-400")}>
+                        <td className={"px-4 py-3 text-center text-gray-400 text-xs " + (isRepl ? "text-red-500" : "")}>{item.id}</td>
+                        <td className={"px-4 py-3 text-center font-mono text-xs " + (isRepl ? "text-red-500" : "text-gray-400")}>
                           {'BK-FE-' + String(item.id).padStart(3, '0')}
                         </td>
-                        <td className={"px-4 py-3 font-medium " + (isRepl ? "text-red-400 font-semibold" : "text-slate-100")}>
+                        <td className={"px-4 py-3 font-medium " + (isRepl ? "text-red-600 font-semibold" : "text-gray-900")}>
                           {item.location || '-'}
                         </td>
                         <td className={"px-4 py-3 " + cellCls}>{item.type || '-'}</td>
                         <td className={"px-4 py-3 text-center " + cellCls}>{item.mfgYm || '-'}</td>
-                        <td className={"px-4 py-3 text-center font-mono text-xs " + (mo >= REPLACE_MONTHS ? "text-red-400 font-bold" : mo >= 90 ? "text-amber-400" : "text-slate-400")}>
+                        <td className={"px-4 py-3 text-center font-mono text-xs " + (mo >= REPLACE_MONTHS ? "text-red-600 font-bold" : mo >= 90 ? "text-amber-600" : "text-gray-500")}>
                           {calcReplaceYm(item.mfgYm)}
                         </td>
-                        <td className={"px-4 py-3 text-center " + (daysElapsed(item.lastInspectionDate) >= INSPECT_DAYS ? "text-amber-400" : "text-slate-300")}>
+                        <td className={"px-4 py-3 text-center " + (daysElapsed(item.lastInspectionDate) >= INSPECT_DAYS ? "text-amber-600" : "text-gray-600")}>
                           {item.lastInspectionDate || '-'}
                         </td>
                         <td className="px-4 py-3 text-center">
                           <StatusBadge item={item} />
                         </td>
-                        <td className={"px-4 py-3 text-center " + cellCls}>{item.manager || <span className="text-slate-600">-</span>}</td>
-                        <td className={"px-4 py-3 max-w-[140px] truncate text-xs " + (item.note ? "text-amber-300" : "text-slate-600")}>
+                        <td className={"px-4 py-3 text-center " + cellCls}>{item.manager || <span className="text-gray-400">-</span>}</td>
+                        <td className={"px-4 py-3 max-w-[140px] truncate text-xs " + (item.note ? "text-amber-700" : "text-gray-400")}>
                           {item.note || '-'}
                         </td>
                         <td className="px-4 py-3 text-center">
                           <div className="flex items-center justify-center gap-1">
                             <button onClick={() => setInspectItem(item)}
-                              className="text-xs font-semibold bg-blue-700 hover:bg-blue-600 text-white px-2 py-1 rounded transition" title="점검하기">
+                              className="text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded transition whitespace-nowrap" title="점검하기">
                               <i className="fas fa-clipboard-check mr-1"></i>점검
                             </button>
                             <button onClick={() => handleEdit(item)}
-                              className="text-slate-400 hover:text-amber-400 transition p-1.5 rounded hover:bg-amber-900/30" title="수정">
+                              className="text-gray-400 hover:text-amber-500 transition p-1.5 rounded hover:bg-amber-50" title="수정">
                               <i className="fas fa-pen text-xs"></i>
                             </button>
                             <button onClick={() => handleDelete(item)}
-                              className="text-slate-400 hover:text-red-400 transition p-1.5 rounded hover:bg-red-900/30" title="삭제">
+                              className="text-gray-400 hover:text-red-500 transition p-1.5 rounded hover:bg-red-50" title="삭제">
                               <i className="fas fa-trash text-xs"></i>
                             </button>
                           </div>
@@ -2443,7 +2438,7 @@ app.get('/master', (c) => {
           </div>
 
           {/* 범례 */}
-          <div className="mt-4 flex flex-wrap gap-4 text-xs text-slate-500">
+          <div className="mt-4 flex flex-wrap gap-4 text-xs text-gray-500">
             <span><i className="fas fa-circle-check text-emerald-400 mr-1"></i>양호: 점검일 30일 미경과 &amp; 제조 120개월 미만</span>
             <span><i className="fas fa-clock text-amber-400 mr-1"></i>점검 필요: 최근 점검일로부터 30일 이상 경과</span>
             <span><i className="fas fa-triangle-exclamation text-red-400 mr-1"></i>교체 대상: 제조 후 120개월(10년) 이상 경과 → 빨간색 강조</span>
