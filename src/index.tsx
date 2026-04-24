@@ -1886,30 +1886,51 @@ app.get('/master', (c) => {
   // ═══════════════════════════════════════════════════════════════
   //  요약 카드
   // ═══════════════════════════════════════════════════════════════
-  function SummaryCards({ items }) {
+  function SummaryCards({ items, activeFilter, onFilterChange }) {
     const total   = items.length;
     const replace = items.filter(i => calcDisplayStatus(i) === 'replace').length;
     const check   = items.filter(i => calcDisplayStatus(i) === 'check').length;
     const good    = total - replace - check;
 
     const cards = [
-      { label:'전체 소화기',  value:total,   icon:'fa-fire-extinguisher',   color:'from-blue-600 to-blue-800',       textColor:'text-blue-200',   valueColor:'text-white' },
-      { label:'양호',         value:good,    icon:'fa-circle-check',         color:'from-emerald-600 to-emerald-800', textColor:'text-emerald-200', valueColor:'text-white' },
-      { label:'점검 필요',    value:check,   icon:'fa-clock',                color:'from-amber-600 to-amber-800',     textColor:'text-amber-200',  valueColor:'text-white' },
-      { label:'교체 대상',    value:replace, icon:'fa-triangle-exclamation', color:'from-red-700 to-red-900',         textColor:'text-red-200',    valueColor:'text-white' },
+      { label:'전체 소화기', value:total,   icon:'fa-fire-extinguisher',   filterKey:'all',     color:'from-blue-600 to-blue-800',       ring:'ring-blue-400',    textColor:'text-blue-200',   valueColor:'text-white' },
+      { label:'양호',        value:good,    icon:'fa-circle-check',         filterKey:'good',    color:'from-emerald-600 to-emerald-800', ring:'ring-emerald-400', textColor:'text-emerald-200', valueColor:'text-white' },
+      { label:'점검 필요',   value:check,   icon:'fa-clock',                filterKey:'check',   color:'from-amber-600 to-amber-800',     ring:'ring-amber-400',   textColor:'text-amber-200',  valueColor:'text-white' },
+      { label:'교체 대상',   value:replace, icon:'fa-triangle-exclamation', filterKey:'replace', color:'from-red-700 to-red-900',         ring:'ring-red-400',     textColor:'text-red-200',    valueColor:'text-white' },
     ];
 
     return (
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-        {cards.map((c, i) => (
-          <div key={i} className={"rounded-xl p-5 bg-gradient-to-br " + c.color + " shadow-lg animate-in"} style={{animationDelay: i*0.07+'s'}}>
-            <div className="flex items-center justify-between mb-2">
-              <span className={"text-sm font-medium " + c.textColor}>{c.label}</span>
-              <i className={"fas " + c.icon + " text-lg opacity-70 " + c.textColor}></i>
+        {cards.map((c, i) => {
+          const isActive = activeFilter === c.filterKey;
+          return (
+            <div
+              key={i}
+              onClick={() => onFilterChange(c.filterKey)}
+              className={
+                "rounded-xl p-5 bg-gradient-to-br shadow-lg animate-in "
+                + c.color
+                + " cursor-pointer select-none transition-all duration-200 "
+                + "hover:opacity-90 hover:-translate-y-1 hover:shadow-xl "
+                + (isActive ? "ring-2 ring-offset-2 ring-offset-slate-900 " + c.ring : "")
+              }
+              style={{animationDelay: i*0.07+'s'}}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className={"text-sm font-medium " + c.textColor}>{c.label}</span>
+                <i className={"fas " + c.icon + " text-lg opacity-70 " + c.textColor}></i>
+              </div>
+              <div className={"text-3xl font-bold " + c.valueColor}>
+                {c.value}<span className="text-base font-normal ml-1 opacity-70">개</span>
+              </div>
+              {isActive && (
+                <div className={"text-xs mt-2 font-medium opacity-80 " + c.textColor}>
+                  <i className="fas fa-filter mr-1"></i>필터 적용 중
+                </div>
+              )}
             </div>
-            <div className={"text-3xl font-bold " + c.valueColor}>{c.value}<span className="text-base font-normal ml-1 opacity-70">개</span></div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     );
   }
@@ -2134,7 +2155,7 @@ app.get('/master', (c) => {
         <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
 
           {/* 요약 카드 */}
-          <SummaryCards items={items} />
+          <SummaryCards items={items} activeFilter={filter} onFilterChange={setFilter} />
 
           {/* 검색 + 필터 바 */}
           <div className="flex flex-col sm:flex-row gap-3 mb-4">
