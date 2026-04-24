@@ -1,12 +1,1568 @@
 import { Hono } from 'hono'
-import { renderer } from './renderer'
+import { serveStatic } from 'hono/cloudflare-workers'
 
 const app = new Hono()
 
-app.use(renderer)
+app.use('/static/*', serveStatic({ root: './public' }))
 
-app.get('/', (c) => {
-  return c.render(<h1>Hello!</h1>)
+// ── Types ─────────────────────────────────────────────────────────────────
+interface Extinguisher {
+  id: string
+  name: string
+  buildingId: string
+  floor: number
+  location: { x: number; y: number } // % on floor plan
+  lastInspected: string
+  nextInspection: string
+  inspector: string
+  type: string   // ABC분말, CO2, 할론 등
+  capacity: string // 3.3kg, 6.8kg 등
+  manufacture: string // 제조연월
+  status: 'good' | 'warning' | 'danger'
+}
+
+interface Building {
+  id: string
+  name: string
+  shortName: string
+  floors: number
+  mapX: number  // % on satellite map
+  mapY: number
+  mapW: number
+  mapH: number
+  color: string
+}
+
+// ── Buildings data ─────────────────────────────────────────────────────────
+// 좌표 기준: factory_map.jpg (1992×1588)
+// 이미지 분석 기반 정밀 좌표:
+// - 공장 부지: x=2~92%, y=5~97% (검정 배경은 우상단 + 외곽)
+// - 좌상단 파란지붕 군: x=0~38%, y=0~32%
+// - 중앙 설비 구역: x=15~65%, y=35~72%
+// - 우측 대형건물: x=60~90%, y=28~68%
+// - 하단 녹색지붕: x=16~58%, y=72~100%
+// - BKLS 라벨: x=11~14%, y=39~43%  → 관리동/BK동 위치
+// - BK 라벨: x=17~20%, y=45~49%
+// - AK/CK 라벨: x=26~31%, y=59~65%
+// - SK1,2 라벨: x=57~61%, y=39~44%
+// - SK3-9 라벨: x=83~87%, y=56~63%
+const buildings: Building[] = [
+  // ── 좌중단 관리/사무 클러스터 (BKLS/BK 라벨 위치 기준) ──
+  { id: 'bkls',       name: 'BKLS동',        shortName: 'BKLS',      floors: 2, mapX: 9,  mapY: 37, mapW: 7,  mapH: 6,  color: '#3b82f6' },
+  { id: 'bk-office',  name: 'BK사무실',       shortName: 'BK사무실',  floors: 2, mapX: 15, mapY: 43, mapW: 7,  mapH: 6,  color: '#06b6d4' },
+  { id: 'admin',      name: '관리동',          shortName: '관리동',    floors: 2, mapX: 3,  mapY: 43, mapW: 6,  mapH: 5,  color: '#8b5cf6' },
+  // ── 좌하단 생산동군 (AK/CK 라벨, 좌하단 녹색지붕 위) ──
+  { id: 'ak-plant',   name: 'AK공장',          shortName: 'AK',        floors: 1, mapX: 24, mapY: 57, mapW: 10, mapH: 9,  color: '#f59e0b' },
+  { id: 'ck-plant',   name: 'CK공장',          shortName: 'CK',        floors: 1, mapX: 17, mapY: 53, mapW: 9,  mapH: 8,  color: '#ef4444' },
+  // ── 하단 녹색지붕 건물군 ──
+  { id: 'green-a',    name: '제품창고 A',       shortName: '창고A',     floors: 1, mapX: 16, mapY: 73, mapW: 14, mapH: 12, color: '#10b981' },
+  { id: 'green-b',    name: '제품창고 B',       shortName: '창고B',     floors: 1, mapX: 30, mapY: 76, mapW: 14, mapH: 12, color: '#84cc16' },
+  { id: 'green-c',    name: '출하동',           shortName: '출하동',    floors: 1, mapX: 44, mapY: 74, mapW: 10, mapH: 10, color: '#a78bfa' },
+  // ── 중앙 설비/공정 구역 ──
+  { id: 'util-center',name: '유틸리티센터',     shortName: '유틸',      floors: 1, mapX: 33, mapY: 42, mapW: 12, mapH: 10, color: '#f97316' },
+  // ── 우측 SK 1,2호기 (x=57~61%, y=39~44%) ──
+  { id: 'sk12',       name: 'SK 1,2호기',       shortName: 'SK1,2',     floors: 1, mapX: 54, mapY: 36, mapW: 14, mapH: 12, color: '#ec4899' },
+  // ── 우측 대형건물 (x=60~89%, y=28~68%) ──
+  { id: 'main-plant', name: '메인공장동',        shortName: '메인공장',  floors: 1, mapX: 62, mapY: 27, mapW: 24, mapH: 20, color: '#f59e0b' },
+  // ── SK 3-9호기 (x=83~87%, y=56~63%) ──
+  { id: 'sk39',       name: 'SK 3-9호기',        shortName: 'SK3-9',     floors: 1, mapX: 78, mapY: 53, mapW: 13, mapH: 12, color: '#06b6d4' },
+]
+
+// ── Extinguishers data ─────────────────────────────────────────────────────
+function calcStatus(nextDate: string): 'good' | 'warning' | 'danger' {
+  const today = new Date()
+  const next = new Date(nextDate)
+  const diff = Math.ceil((next.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+  return diff < 0 ? 'danger' : diff <= 30 ? 'warning' : 'good'
+}
+
+const extinguishers: Extinguisher[] = [
+  // BKLS동
+  { id: 'EXT-BKLS-01', name: '소화기 #1', buildingId: 'bkls', floor: 1, location: { x: 20, y: 55 }, lastInspected: '2025-01-15', nextInspection: '2025-07-15', inspector: '홍길동', type: 'ABC분말', capacity: '3.3kg', manufacture: '2022-06', status: 'good' },
+  { id: 'EXT-BKLS-02', name: '소화기 #2', buildingId: 'bkls', floor: 2, location: { x: 70, y: 45 }, lastInspected: '2025-02-10', nextInspection: '2025-04-30', inspector: '김철수', type: 'ABC분말', capacity: '3.3kg', manufacture: '2021-11', status: 'warning' },
+  // BK사무실
+  { id: 'EXT-BK-01', name: '소화기 #1', buildingId: 'bk-office', floor: 1, location: { x: 25, y: 60 }, lastInspected: '2025-03-15', nextInspection: '2025-09-15', inspector: '이영희', type: 'ABC분말', capacity: '3.3kg', manufacture: '2023-03', status: 'good' },
+  { id: 'EXT-BK-02', name: '소화기 #2', buildingId: 'bk-office', floor: 2, location: { x: 65, y: 40 }, lastInspected: '2024-11-20', nextInspection: '2025-04-15', inspector: '박민수', type: 'CO2', capacity: '6.8kg', manufacture: '2021-05', status: 'danger' },
+  // 관리동
+  { id: 'EXT-ADM-01', name: '소화기 #1', buildingId: 'admin', floor: 1, location: { x: 30, y: 55 }, lastInspected: '2025-02-28', nextInspection: '2025-08-28', inspector: '최지영', type: 'ABC분말', capacity: '3.3kg', manufacture: '2022-12', status: 'good' },
+  { id: 'EXT-ADM-02', name: '소화기 #2', buildingId: 'admin', floor: 2, location: { x: 60, y: 40 }, lastInspected: '2024-10-01', nextInspection: '2025-04-01', inspector: '홍길동', type: 'CO2', capacity: '6.8kg', manufacture: '2020-03', status: 'danger' },
+  // AK공장
+  { id: 'EXT-AK-01', name: '소화기 #1', buildingId: 'ak-plant', floor: 1, location: { x: 20, y: 35 }, lastInspected: '2025-01-10', nextInspection: '2025-05-10', inspector: '김철수', type: 'ABC분말', capacity: '6.8kg', manufacture: '2022-08', status: 'warning' },
+  { id: 'EXT-AK-02', name: '소화기 #2', buildingId: 'ak-plant', floor: 1, location: { x: 55, y: 60 }, lastInspected: '2025-03-01', nextInspection: '2025-09-01', inspector: '이영희', type: 'ABC분말', capacity: '6.8kg', manufacture: '2023-01', status: 'good' },
+  { id: 'EXT-AK-03', name: '소화기 #3', buildingId: 'ak-plant', floor: 1, location: { x: 80, y: 35 }, lastInspected: '2024-09-15', nextInspection: '2025-03-15', inspector: '박민수', type: 'CO2', capacity: '9.1kg', manufacture: '2020-07', status: 'danger' },
+  // CK공장
+  { id: 'EXT-CK-01', name: '소화기 #1', buildingId: 'ck-plant', floor: 1, location: { x: 25, y: 40 }, lastInspected: '2025-02-15', nextInspection: '2025-08-15', inspector: '최지영', type: 'ABC분말', capacity: '6.8kg', manufacture: '2022-11', status: 'good' },
+  { id: 'EXT-CK-02', name: '소화기 #2', buildingId: 'ck-plant', floor: 1, location: { x: 70, y: 65 }, lastInspected: '2025-01-25', nextInspection: '2025-04-25', inspector: '홍길동', type: 'ABC분말', capacity: '3.3kg', manufacture: '2022-05', status: 'warning' },
+  // 제품창고 A
+  { id: 'EXT-GA-01', name: '소화기 #1', buildingId: 'green-a', floor: 1, location: { x: 20, y: 45 }, lastInspected: '2025-03-10', nextInspection: '2025-09-10', inspector: '김철수', type: 'ABC분말', capacity: '6.8kg', manufacture: '2023-02', status: 'good' },
+  { id: 'EXT-GA-02', name: '소화기 #2', buildingId: 'green-a', floor: 1, location: { x: 75, y: 55 }, lastInspected: '2025-02-05', nextInspection: '2025-05-05', inspector: '이영희', type: 'CO2', capacity: '9.1kg', manufacture: '2021-09', status: 'warning' },
+  // SK 1,2호기
+  { id: 'EXT-SK12-01', name: '소화기 #1', buildingId: 'sk12', floor: 1, location: { x: 20, y: 40 }, lastInspected: '2025-03-20', nextInspection: '2025-09-20', inspector: '박민수', type: 'ABC분말', capacity: '6.8kg', manufacture: '2023-04', status: 'good' },
+  { id: 'EXT-SK12-02', name: '소화기 #2', buildingId: 'sk12', floor: 1, location: { x: 55, y: 35 }, lastInspected: '2025-01-05', nextInspection: '2025-04-20', inspector: '최지영', type: 'CO2', capacity: '9.1kg', manufacture: '2021-11', status: 'warning' },
+  { id: 'EXT-SK12-03', name: '소화기 #3', buildingId: 'sk12', floor: 1, location: { x: 80, y: 65 }, lastInspected: '2024-08-01', nextInspection: '2025-02-01', inspector: '홍길동', type: 'ABC분말', capacity: '6.8kg', manufacture: '2020-12', status: 'danger' },
+  // 메인공장동
+  { id: 'EXT-MP-01', name: '소화기 #1', buildingId: 'main-plant', floor: 1, location: { x: 15, y: 30 }, lastInspected: '2025-03-05', nextInspection: '2025-09-05', inspector: '이영희', type: 'ABC분말', capacity: '9.1kg', manufacture: '2023-01', status: 'good' },
+  { id: 'EXT-MP-02', name: '소화기 #2', buildingId: 'main-plant', floor: 1, location: { x: 45, y: 50 }, lastInspected: '2025-01-30', nextInspection: '2025-05-20', inspector: '김철수', type: 'CO2', capacity: '9.1kg', manufacture: '2022-06', status: 'warning' },
+  { id: 'EXT-MP-03', name: '소화기 #3', buildingId: 'main-plant', floor: 1, location: { x: 75, y: 30 }, lastInspected: '2025-02-20', nextInspection: '2025-08-20', inspector: '박민수', type: 'ABC분말', capacity: '6.8kg', manufacture: '2022-09', status: 'good' },
+  { id: 'EXT-MP-04', name: '소화기 #4', buildingId: 'main-plant', floor: 1, location: { x: 85, y: 65 }, lastInspected: '2024-07-15', nextInspection: '2025-01-15', inspector: '최지영', type: 'CO2', capacity: '9.1kg', manufacture: '2020-03', status: 'danger' },
+  // SK 3-9호기
+  { id: 'EXT-SK39-01', name: '소화기 #1', buildingId: 'sk39', floor: 1, location: { x: 20, y: 40 }, lastInspected: '2025-03-18', nextInspection: '2025-09-18', inspector: '이영희', type: 'ABC분말', capacity: '6.8kg', manufacture: '2023-03', status: 'good' },
+  { id: 'EXT-SK39-02', name: '소화기 #2', buildingId: 'sk39', floor: 1, location: { x: 70, y: 60 }, lastInspected: '2025-01-12', nextInspection: '2025-04-28', inspector: '홍길동', type: 'CO2', capacity: '9.1kg', manufacture: '2021-07', status: 'warning' },
+]
+// auto-recalculate status
+extinguishers.forEach(e => { e.status = calcStatus(e.nextInspection) })
+
+// ── API ────────────────────────────────────────────────────────────────────
+app.get('/api/buildings', (c) => c.json(buildings))
+app.get('/api/extinguishers', (c) => c.json(extinguishers))
+
+app.get('/api/extinguishers/building/:bid/floor/:floor', (c) => {
+  const bid   = c.req.param('bid')
+  const floor = parseInt(c.req.param('floor'))
+  return c.json(extinguishers.filter(e => e.buildingId === bid && e.floor === floor))
 })
+
+app.post('/api/extinguishers/:id/inspect', async (c) => {
+  const id  = c.req.param('id')
+  const ext = extinguishers.find(e => e.id === id)
+  if (!ext) return c.json({ error: 'Not found' }, 404)
+  const body = await c.req.json() as { inspector: string; nextInspection: string }
+  ext.lastInspected  = new Date().toISOString().split('T')[0]
+  ext.nextInspection = body.nextInspection
+  ext.inspector      = body.inspector
+  ext.status         = calcStatus(ext.nextInspection)
+  return c.json({ success: true, extinguisher: ext })
+})
+
+// ── Main HTML ──────────────────────────────────────────────────────────────
+app.get('/', (c) => c.html(HTML))
+
+const HTML = `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>소화기 점검 시스템 – 태경비케이 단양1공장</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml"/>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet"/>
+<style>
+/* ── reset & base ── */
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Apple SD Gothic Neo',Malgun Gothic,sans-serif;background:#0f172a;color:#e2e8f0;overflow:hidden;height:100vh}
+
+/* ── top nav ── */
+#topnav{height:52px;background:#1e293b;border-bottom:1px solid #334155;display:flex;align-items:center;justify-content:space-between;padding:0 16px;z-index:100;position:relative}
+
+/* ── layout ── */
+#app{display:flex;height:calc(100vh - 52px)}
+
+/* ── MAP VIEWPORT ── */
+#map-viewport{flex:1;overflow:hidden;position:relative;background:#0a0f1a;cursor:grab}
+#map-viewport.grabbing{cursor:grabbing}
+#map-canvas{position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform}
+#factory-img{display:block;width:100%;height:auto;user-select:none;pointer-events:none}
+
+/* ── building overlays (on satellite map) ── */
+.bld-overlay{
+  position:absolute;
+  border:2px solid transparent;
+  border-radius:4px;
+  cursor:pointer;
+  transition:background 0.15s,border-color 0.15s,transform 0.1s;
+  display:flex;align-items:flex-end;justify-content:center;
+  padding-bottom:2px;
+  overflow:visible;
+}
+.bld-overlay:hover{transform:scale(1.04);z-index:20}
+.bld-overlay .bld-label{
+  font-size:10px;font-weight:700;color:#fff;
+  text-shadow:0 0 6px rgba(0,0,0,1),0 0 3px rgba(0,0,0,1);
+  white-space:nowrap;pointer-events:none;line-height:1;
+  background:rgba(0,0,0,0.55);padding:1px 4px;border-radius:3px;
+}
+.bld-overlay.selected{z-index:30}
+
+/* ── zoom controls ── */
+#zoom-controls{
+  position:absolute;bottom:20px;right:20px;z-index:50;
+  display:flex;flex-direction:column;gap:4px;
+}
+.zoom-btn{
+  width:36px;height:36px;background:#1e293b;border:1px solid #475569;
+  color:#e2e8f0;border-radius:8px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  font-size:18px;font-weight:700;transition:background 0.15s;
+}
+.zoom-btn:hover{background:#334155}
+
+/* ── status badges on map ── */
+.bld-badge{
+  position:absolute;top:-8px;right:-8px;
+  width:16px;height:16px;border-radius:50%;border:2px solid #0f172a;
+  font-size:9px;color:#fff;font-weight:900;
+  display:flex;align-items:center;justify-content:center;
+  pointer-events:none;
+}
+
+/* ── RIGHT PANEL ── */
+#right-panel{
+  width:360px;min-width:320px;background:#1e293b;border-left:1px solid #334155;
+  display:flex;flex-direction:column;overflow:hidden;
+  transition:width 0.3s;
+}
+#right-panel.collapsed{width:0;min-width:0;border:none}
+
+/* ── panel views ── */
+.panel-view{display:none;flex:1;overflow-y:auto;flex-direction:column}
+.panel-view.active{display:flex}
+
+/* ── breadcrumb ── */
+#breadcrumb{
+  padding:10px 14px;background:#0f172a;border-bottom:1px solid #1e293b;
+  font-size:12px;color:#64748b;display:flex;align-items:center;gap:4px;flex-wrap:wrap;
+}
+.bc-item{cursor:pointer;color:#94a3b8;transition:color 0.15s}
+.bc-item:hover{color:#e2e8f0}
+.bc-item.active{color:#e2e8f0;font-weight:600;cursor:default}
+
+/* ── floor plan canvas ── */
+#floor-plan-wrap{
+  position:relative;background:#0f172a;
+  display:flex;align-items:center;justify-content:center;
+  min-height:220px;border-bottom:1px solid #334155;overflow:hidden;
+}
+#floor-plan-svg{width:100%;max-height:240px}
+
+/* ── ext markers on floor plan ── */
+.fp-marker{
+  cursor:pointer;transition:r 0.15s;
+}
+.fp-marker:hover{filter:drop-shadow(0 0 4px #fff)}
+
+/* ── ext list cards ── */
+.ext-card{
+  background:#0f172a;border:1px solid #1e293b;border-radius:10px;
+  padding:10px 12px;cursor:pointer;transition:border-color 0.15s,background 0.15s;
+  display:flex;align-items:center;gap:10px;
+}
+.ext-card:hover{border-color:#475569;background:#1e293b}
+.ext-card.selected{border-color:#3b82f6;background:#1e3a5f}
+
+/* ── status dot ── */
+.s-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.s-dot.good{background:#16a34a}
+.s-dot.warning{background:#d97706}
+.s-dot.danger{background:#dc2626;animation:pulse-r 1.5s infinite}
+@keyframes pulse-r{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.7)}50%{box-shadow:0 0 0 6px rgba(220,38,38,0)}}
+
+/* ── detail panel ── */
+.info-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #1e293b;font-size:13px}
+.info-row:last-child{border:none}
+.info-key{color:#64748b}
+.info-val{color:#e2e8f0;font-weight:600}
+.dday-chip{
+  display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:700;
+}
+.dday-chip.good{background:#14532d;color:#4ade80}
+.dday-chip.warning{background:#451a03;color:#fbbf24}
+.dday-chip.danger{background:#450a0a;color:#f87171}
+
+/* ── mini stats ── */
+.mini-stat{background:#0f172a;border-radius:8px;padding:8px;text-align:center}
+.mini-stat .val{font-size:22px;font-weight:800;line-height:1}
+.mini-stat .lbl{font-size:10px;color:#64748b;margin-top:2px}
+
+/* ── toast ── */
+#toast{
+  position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
+  background:#1e293b;border:1px solid #475569;color:#e2e8f0;
+  padding:10px 20px;border-radius:999px;font-size:13px;
+  z-index:9999;display:none;white-space:nowrap;
+  box-shadow:0 4px 20px rgba(0,0,0,.6);
+}
+
+/* ══════════════════════════════════════════
+   POLYGON TOOL
+══════════════════════════════════════════ */
+/* 툴 토글 버튼 - 지도 좌측 하단 줌 버튼 위 */
+#poly-tool-btn{
+  position:absolute;bottom:72px;left:16px;z-index:60;
+  background:#7c3aed;border:1px solid #a78bfa;color:#fff;
+  border-radius:10px;padding:7px 12px;font-size:12px;font-weight:700;
+  cursor:pointer;display:flex;align-items:center;gap:6px;
+  box-shadow:0 4px 14px rgba(124,58,237,.5);transition:background .15s;
+  white-space:nowrap;
+}
+#poly-tool-btn:hover{background:#6d28d9}
+#poly-tool-btn.active{background:#dc2626;border-color:#f87171;box-shadow:0 4px 14px rgba(220,38,38,.5)}
+
+/* SVG 오버레이 - viewport 위에 직접 (스케일 무관하게 % 좌표 표시) */
+#poly-svg{
+  position:absolute;top:0;left:0;width:100%;height:100%;
+  pointer-events:none;z-index:40;overflow:visible;
+}
+#poly-svg.active{ pointer-events:all; cursor:crosshair; }
+
+/* 실시간 좌표 툴팁 */
+#poly-cursor-tip{
+  position:fixed;z-index:9000;
+  background:rgba(15,23,42,0.92);border:1px solid #7c3aed;
+  color:#a78bfa;font-family:monospace;font-size:11px;font-weight:600;
+  padding:3px 8px;border-radius:6px;pointer-events:none;
+  display:none;white-space:nowrap;
+  box-shadow:0 2px 8px rgba(0,0,0,.6);
+}
+
+/* 폴리곤 툴 패널 - 화면 우측 하단 fixed (right panel 왼쪽) */
+#poly-panel{
+  position:fixed;
+  bottom:20px;
+  right:380px;
+  z-index:500;
+  width:310px;background:#0f172a;border:1px solid #475569;
+  border-radius:14px;overflow:hidden;
+  box-shadow:0 8px 32px rgba(0,0,0,.85);
+  display:none;flex-direction:column;
+  max-height:calc(100vh - 80px);
+}
+#poly-panel.open{display:flex}
+
+#poly-panel-header{
+  background:#1e293b;padding:9px 13px;
+  display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid #334155;flex-shrink:0;
+}
+#poly-panel-header .title{font-size:13px;font-weight:700;color:#e2e8f0;display:flex;align-items:center;gap:6px}
+#poly-panel-close{background:none;border:none;color:#64748b;cursor:pointer;font-size:14px;padding:2px 6px;border-radius:4px;transition:color .15s}
+#poly-panel-close:hover{color:#e2e8f0;background:#334155}
+
+/* 상태 표시바 */
+#poly-status-bar{
+  background:#0a0f1a;padding:5px 13px;
+  border-bottom:1px solid #1e293b;
+  font-size:11px;color:#64748b;
+  display:flex;align-items:center;justify-content:space-between;
+  flex-shrink:0;
+}
+#poly-status-bar .pts-count{color:#a78bfa;font-weight:700}
+#poly-status-bar .closed-tag{
+  background:#14532d;color:#4ade80;
+  padding:1px 7px;border-radius:999px;font-size:10px;font-weight:700;
+  display:none;
+}
+#poly-status-bar .closed-tag.show{display:inline}
+
+/* 이름 입력 */
+#poly-name-row{padding:7px 12px;border-bottom:1px solid #1e293b;display:flex;align-items:center;gap:6px;flex-shrink:0}
+#poly-name-input{
+  flex:1;background:#1e293b;border:1px solid #334155;border-radius:7px;
+  padding:5px 9px;color:#e2e8f0;font-size:12px;outline:none;
+}
+#poly-name-input:focus{border-color:#7c3aed;box-shadow:0 0 0 2px rgba(124,58,237,.25)}
+#poly-name-input::placeholder{color:#475569}
+
+/* 툴바 */
+#poly-toolbar{
+  padding:7px 11px;display:flex;align-items:center;
+  gap:5px;border-bottom:1px solid #1e293b;flex-wrap:wrap;flex-shrink:0;
+}
+.poly-action-btn{
+  flex:1;padding:5px 6px;border-radius:7px;font-size:11px;font-weight:600;
+  border:1px solid #334155;cursor:pointer;transition:all .15s;
+  display:flex;align-items:center;justify-content:center;gap:3px;
+  white-space:nowrap;min-width:0;
+}
+.poly-action-btn.undo{background:#1e293b;color:#94a3b8}.poly-action-btn.undo:hover{background:#334155;color:#fff}
+.poly-action-btn.clear{background:#1e293b;color:#f87171;border-color:#7f1d1d}.poly-action-btn.clear:hover{background:#7f1d1d;color:#fff}
+.poly-action-btn.close-poly{background:#1e293b;color:#4ade80;border-color:#14532d}.poly-action-btn.close-poly:hover{background:#14532d;color:#fff}
+.poly-action-btn.copy{background:#7c3aed;color:#fff;border-color:#a78bfa}.poly-action-btn.copy:hover{background:#6d28d9}
+
+/* 좌표 출력 */
+#poly-coords-box{
+  padding:9px 12px;overflow-y:auto;max-height:150px;flex-shrink:0;
+}
+#poly-coords-output{
+  background:#0a0f1a;border:1px solid #1e293b;border-radius:8px;
+  padding:8px 10px;font-size:10.5px;font-family:monospace;color:#a78bfa;
+  line-height:1.7;min-height:44px;white-space:pre-wrap;word-break:break-all;
+  user-select:all;cursor:text;
+}
+#poly-coords-output:hover{border-color:#334155}
+
+/* 포인트 카운트 */
+#poly-count{font-size:11px;color:#64748b;padding:0 12px 6px;text-align:right;flex-shrink:0}
+
+/* 저장된 폴리곤 목록 */
+#poly-saved-list{
+  border-top:1px solid #1e293b;padding:6px 12px 10px;
+  max-height:140px;overflow-y:auto;flex-shrink:0;
+}
+#poly-saved-list .saved-header{font-size:10px;color:#475569;margin-bottom:4px;font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+#poly-saved-list .saved-item{
+  display:flex;align-items:center;gap:5px;
+  padding:4px 0;border-bottom:1px solid #0f172a;font-size:11px;
+}
+#poly-saved-list .saved-item:last-child{border:none}
+#poly-saved-list .saved-name{color:#cbd5e1;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#poly-saved-list .saved-actions{display:flex;gap:3px;flex-shrink:0}
+#poly-saved-list .sa-btn{
+  background:#1e293b;border:1px solid #334155;color:#94a3b8;
+  padding:2px 7px;border-radius:5px;font-size:10px;cursor:pointer;
+  transition:all .15s;
+}
+#poly-saved-list .sa-btn:hover{background:#334155;color:#fff}
+#poly-saved-list .sa-btn.del{border-color:#7f1d1d;color:#f87171}
+#poly-saved-list .sa-btn.del:hover{background:#7f1d1d;color:#fff}
+
+/* 안내 텍스트 */
+#poly-guide{
+  padding:6px 12px 8px;font-size:10px;color:#475569;
+  border-top:1px solid #1e293b;line-height:1.6;flex-shrink:0;
+}
+</style>
+</head>
+<body>
+
+<!-- polygon cursor tooltip -->
+<div id="poly-cursor-tip"></div>
+
+<!-- ═══ TOP NAV ═══ -->
+<nav id="topnav">
+  <div class="flex items-center gap-3">
+    <div class="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center">
+      <i class="fas fa-fire-extinguisher text-white text-sm"></i>
+    </div>
+    <div>
+      <div class="text-white font-bold text-sm leading-none">소화기 점검 관리 시스템</div>
+      <div class="text-gray-400 text-xs">태경비케이 단양1공장</div>
+    </div>
+  </div>
+  <div class="flex items-center gap-3">
+    <div id="nav-stats" class="hidden sm:flex items-center gap-3 text-xs">
+      <span class="flex items-center gap-1.5"><span class="s-dot good"></span><span id="ns-good" class="text-gray-300">0 정상</span></span>
+      <span class="flex items-center gap-1.5"><span class="s-dot warning"></span><span id="ns-warn" class="text-gray-300">0 주의</span></span>
+      <span class="flex items-center gap-1.5"><span class="s-dot danger"></span><span id="ns-danger" class="text-gray-300">0 위험</span></span>
+    </div>
+    <button onclick="App.resetView()" class="text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg text-gray-300 transition flex items-center gap-1.5">
+      <i class="fas fa-compress-alt"></i><span class="hidden sm:inline">전체보기</span>
+    </button>
+  </div>
+</nav>
+
+<!-- ═══ APP ═══ -->
+<div id="app">
+
+  <!-- ── MAP VIEWPORT ── -->
+  <div id="map-viewport">
+    <div id="map-canvas">
+      <img id="factory-img" src="/static/factory_map.jpg" alt="공장 전경" draggable="false"/>
+      <!-- building overlays injected by JS -->
+      <div id="overlays-layer"></div>
+    </div>
+
+    <!-- zoom controls -->
+    <div id="zoom-controls">
+      <button class="zoom-btn" onclick="App.zoom(0.25)" title="줌인">+</button>
+      <button class="zoom-btn" style="font-size:13px" onclick="App.resetView()" title="전체보기"><i class="fas fa-home"></i></button>
+      <button class="zoom-btn" onclick="App.zoom(-0.25)" title="줌아웃">−</button>
+    </div>
+
+    <!-- map hint -->
+    <div id="map-hint" class="absolute top-3 left-3 bg-black/50 text-white text-xs px-3 py-1.5 rounded-lg pointer-events-none">
+      <i class="fas fa-hand-pointer mr-1"></i>건물을 클릭하면 층/소화기를 선택할 수 있습니다
+    </div>
+
+
+    <!-- ── POLYGON TOOL: SVG overlay on map-viewport ── -->
+    <svg id="poly-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+
+    <!-- ── Polygon tool toggle button ── -->
+    <button id="poly-tool-btn" onclick="PolyTool.toggle()" title="폴리곤 좌표 따기">
+      <i class="fas fa-draw-polygon"></i> 좌표 따기
+    </button>
+
+    <!-- ── Polygon tool panel (fixed bottom-right, left of right-panel) ── -->
+    <div id="poly-panel">
+      <div id="poly-panel-header">
+        <span class="title"><i class="fas fa-draw-polygon" style="color:#a78bfa"></i> 폴리곤 좌표 추출</span>
+        <button id="poly-panel-close" onclick="PolyTool.toggle()" title="닫기"><i class="fas fa-times"></i></button>
+      </div>
+
+      <!-- 상태바 -->
+      <div id="poly-status-bar">
+        <span>점: <span class="pts-count" id="poly-pts-num">0</span>개</span>
+        <span class="closed-tag" id="poly-closed-tag">● 닫힘</span>
+      </div>
+
+      <!-- 이름 입력 -->
+      <div id="poly-name-row">
+        <i class="fas fa-tag" style="color:#64748b;font-size:11px"></i>
+        <input id="poly-name-input" type="text" placeholder="구역 이름 (예: 관리동)" />
+      </div>
+
+      <!-- 툴바 -->
+      <div id="poly-toolbar">
+        <button class="poly-action-btn close-poly" onclick="PolyTool.closePoly()" title="폴리곤 닫기">
+          <i class="fas fa-vector-square"></i> 닫기
+        </button>
+        <button class="poly-action-btn undo" onclick="PolyTool.undo()" title="마지막 점 취소">
+          <i class="fas fa-undo"></i> 되돌리기
+        </button>
+        <button class="poly-action-btn clear" onclick="PolyTool.clear()" title="전체 초기화">
+          <i class="fas fa-trash"></i> 초기화
+        </button>
+      </div>
+
+      <!-- 좌표 출력 -->
+      <div id="poly-coords-box">
+        <div id="poly-coords-output">📍 지도 위를 클릭하여 점을 추가하세요</div>
+      </div>
+      <div id="poly-count">점: 0개</div>
+
+      <!-- 저장 / 복사 버튼 -->
+      <div style="padding:0 11px 8px;display:flex;gap:5px">
+        <button class="poly-action-btn copy" style="flex:2" onclick="PolyTool.save()">
+          <i class="fas fa-save"></i> 저장
+        </button>
+        <button class="poly-action-btn copy" style="flex:3;background:#0f4c81;border-color:#1e6fba" onclick="PolyTool.copyJSON()">
+          <i class="fas fa-copy"></i> JSON 복사
+        </button>
+      </div>
+
+      <!-- 저장된 목록 -->
+      <div id="poly-saved-list" style="display:none">
+        <div class="saved-header">저장된 구역</div>
+        <div id="poly-saved-items"></div>
+      </div>
+
+      <!-- 안내 -->
+      <div id="poly-guide">
+        <i class="fas fa-info-circle" style="color:#7c3aed;margin-right:4px"></i>
+        클릭 → 점 추가 &nbsp;|&nbsp; 첫번째 점 클릭 or 더블클릭 → 닫기<br/>
+        좌표는 이미지 기준 퍼센트(%) 값입니다
+      </div>
+    </div>
+  </div>
+
+  <!-- ── RIGHT PANEL ── -->
+  <aside id="right-panel">
+
+    <!-- breadcrumb -->
+    <div id="breadcrumb">
+      <span class="bc-item active" id="bc-home" onclick="App.goHome()"><i class="fas fa-map mr-1"></i>전체 지도</span>
+    </div>
+
+    <!-- VIEW 0: home (no selection) -->
+    <div id="view-home" class="panel-view active flex-col p-4 gap-4">
+      <div class="text-sm text-gray-400 text-center pt-6">
+        <i class="fas fa-arrow-left text-2xl text-slate-500 block mb-3"></i>
+        지도에서 건물을 클릭하면<br/>상세 정보가 표시됩니다
+      </div>
+      <div class="grid grid-cols-3 gap-2 mt-4">
+        <div class="mini-stat"><div class="val text-white" id="hs-total">0</div><div class="lbl">전체 소화기</div></div>
+        <div class="mini-stat"><div class="val text-yellow-400" id="hs-warn">0</div><div class="lbl">점검 주의</div></div>
+        <div class="mini-stat"><div class="val text-red-400" id="hs-danger">0</div><div class="lbl">기한 초과</div></div>
+      </div>
+      <!-- building list -->
+      <div class="text-xs text-gray-500 mt-2 mb-1 px-1">건물 목록</div>
+      <div id="home-bld-list" class="space-y-1.5"></div>
+    </div>
+
+    <!-- VIEW 1: building selected → floor list -->
+    <div id="view-building" class="panel-view flex-col">
+      <div class="p-4 border-b border-slate-700">
+        <div class="flex items-center gap-3">
+          <div id="vb-icon" class="w-10 h-10 rounded-xl flex items-center justify-center">
+            <i class="fas fa-building text-white text-lg"></i>
+          </div>
+          <div>
+            <div id="vb-name" class="text-white font-bold text-base"></div>
+            <div id="vb-sub"  class="text-gray-400 text-xs"></div>
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-2 mt-3">
+          <div class="mini-stat"><div class="val text-white" id="vb-total">0</div><div class="lbl">소화기</div></div>
+          <div class="mini-stat"><div class="val text-yellow-400" id="vb-warn">0</div><div class="lbl">주의</div></div>
+          <div class="mini-stat"><div class="val text-red-400" id="vb-danger">0</div><div class="lbl">위험</div></div>
+        </div>
+      </div>
+      <div class="p-4">
+        <div class="text-xs text-gray-500 mb-2">층 선택</div>
+        <div id="floor-list" class="grid grid-cols-2 gap-2"></div>
+      </div>
+    </div>
+
+    <!-- VIEW 2: floor selected → floor plan + ext list -->
+    <div id="view-floor" class="panel-view flex-col">
+      <!-- floor plan -->
+      <div id="floor-plan-wrap">
+        <svg id="floor-plan-svg" viewBox="0 0 400 220" xmlns="http://www.w3.org/2000/svg">
+          <rect width="400" height="220" fill="#0f172a"/>
+          <rect x="20" y="15" width="360" height="190" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+          <text x="200" y="116" text-anchor="middle" fill="#475569" font-size="13">평면도 준비중</text>
+          <text x="200" y="134" text-anchor="middle" fill="#334155" font-size="11">이미지를 업로드하면 표시됩니다</text>
+          <g id="fp-markers"></g>
+        </svg>
+        <div id="fp-legend" class="absolute bottom-2 left-3 flex gap-2 text-xs">
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-green-600 border border-white/30 inline-block"></span>정상</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-yellow-600 border border-white/30 inline-block"></span>주의</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-red-600 border border-white/30 inline-block"></span>위험</span>
+        </div>
+      </div>
+      <!-- ext list -->
+      <div class="flex-1 overflow-y-auto p-3 space-y-2">
+        <div class="text-xs text-gray-500 mb-1 px-1" id="floor-ext-header">소화기 목록</div>
+        <div id="floor-ext-list" class="space-y-2"></div>
+      </div>
+    </div>
+
+    <!-- VIEW 3: extinguisher detail -->
+    <div id="view-ext" class="panel-view flex-col">
+      <div class="p-4 space-y-4">
+        <div class="flex items-center gap-3">
+          <div id="ve-icon" class="w-12 h-12 rounded-full flex items-center justify-center">
+            <i class="fas fa-fire-extinguisher text-white text-xl"></i>
+          </div>
+          <div>
+            <div id="ve-name" class="text-white font-bold text-base"></div>
+            <div id="ve-loc"  class="text-gray-400 text-xs"></div>
+          </div>
+        </div>
+
+        <div id="ve-dday-wrap" class="text-center py-3 rounded-xl bg-slate-800">
+          <div class="text-gray-400 text-xs mb-1">다음 점검까지</div>
+          <div id="ve-dday" class="text-4xl font-black"></div>
+        </div>
+
+        <div class="bg-slate-800 rounded-xl p-3 space-y-0">
+          <div class="info-row"><span class="info-key">소화기 ID</span><span class="info-val" id="ve-id"></span></div>
+          <div class="info-row"><span class="info-key">종류</span><span class="info-val" id="ve-type"></span></div>
+          <div class="info-row"><span class="info-key">용량</span><span class="info-val" id="ve-cap"></span></div>
+          <div class="info-row"><span class="info-key">제조연월</span><span class="info-val" id="ve-mfg"></span></div>
+          <div class="info-row"><span class="info-key">최근 점검일</span><span class="info-val" id="ve-last"></span></div>
+          <div class="info-row"><span class="info-key">다음 점검일</span><span class="info-val" id="ve-next"></span></div>
+          <div class="info-row"><span class="info-key">점검자</span><span class="info-val" id="ve-inspector"></span></div>
+          <div class="info-row"><span class="info-key">상태</span><span id="ve-status-chip"></span></div>
+        </div>
+
+        <button id="inspect-btn" onclick="openInspectForm()"
+          class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-sm">
+          <i class="fas fa-clipboard-check"></i> 점검 완료 기록
+        </button>
+        <button onclick="App.goToFloor()" 
+          class="w-full bg-slate-700 hover:bg-slate-600 text-gray-300 py-2 rounded-xl transition text-sm">
+          <i class="fas fa-arrow-left mr-1"></i> 목록으로
+        </button>
+      </div>
+    </div>
+
+  </aside>
+</div>
+
+<!-- ═══ INSPECT MODAL ═══ -->
+<div id="inspect-modal" class="hidden fixed inset-0 bg-black/60 z-[600] flex items-center justify-center">
+  <div class="bg-slate-800 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl border border-slate-600 space-y-4">
+    <h3 class="text-white font-bold text-lg flex items-center gap-2">
+      <i class="fas fa-clipboard-check text-green-400"></i> 점검 완료 기록
+    </h3>
+    <div class="space-y-3">
+      <div>
+        <label class="text-gray-400 text-xs mb-1 block">점검자 이름</label>
+        <input id="form-inspector" type="text" placeholder="홍길동"
+          class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-400"/>
+      </div>
+      <div>
+        <label class="text-gray-400 text-xs mb-1 block">다음 점검 예정일</label>
+        <input id="form-next-date" type="date"
+          class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-400"/>
+      </div>
+    </div>
+    <div class="flex gap-3">
+      <button onclick="closeInspectForm()"
+        class="flex-1 bg-slate-700 hover:bg-slate-600 text-gray-300 py-2 rounded-xl transition text-sm">취소</button>
+      <button onclick="submitInspect()"
+        class="flex-1 bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded-xl transition text-sm">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ TOAST ═══ -->
+<div id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+//  APP STATE
+// ═══════════════════════════════════════════════════════════════════
+const State = {
+  buildings: [],
+  extinguishers: [],
+  selectedBuilding: null,
+  selectedFloor: null,
+  selectedExt: null,
+  // map transform
+  scale: 1,
+  tx: 0,
+  ty: 0,
+  imgNaturalW: 0,
+  imgNaturalH: 0,
+  viewW: 0,
+  viewH: 0,
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  MAP INTERACTION
+// ═══════════════════════════════════════════════════════════════════
+const App = (() => {
+  const vp     = () => document.getElementById('map-viewport')
+  const canvas = () => document.getElementById('map-canvas')
+
+  let drag = false, sx=0, sy=0, ox=0, oy=0
+
+  function applyTransform() {
+    canvas().style.transform = \`translate(\${State.tx}px,\${State.ty}px) scale(\${State.scale})\`
+  }
+
+  // 줌아웃 최소값 = 이미지가 뷰포트를 꽉 채우는 스케일 → 여백 완전 차단
+  function minScale() {
+    const vpW = State.viewW || vp().clientWidth
+    const vpH = State.viewH || vp().clientHeight
+    const iw  = State.imgNaturalW || 1992
+    const ih  = State.imgNaturalH || 1588
+    // cover 방식: 가로·세로 중 더 큰 비율 사용 → 항상 빈 여백 없음
+    return Math.max(vpW / iw, vpH / ih)
+  }
+
+  function clampTranslate() {
+    const vpW = State.viewW, vpH = State.viewH
+    const imgW = State.imgNaturalW * State.scale
+    const imgH = State.imgNaturalH * State.scale
+    // 이미지가 뷰포트보다 작을 수 없으므로 항상 0 이하 / (vpW-imgW) 이상
+    State.tx = Math.min(0, Math.max(vpW - imgW, State.tx))
+    State.ty = Math.min(0, Math.max(vpH - imgH, State.ty))
+  }
+
+  function resetView() {
+    const vpW = State.viewW = vp().clientWidth
+    const vpH = State.viewH = vp().clientHeight
+    const iw  = State.imgNaturalW || 1992
+    const ih  = State.imgNaturalH || 1588
+    // cover: 이미지가 뷰포트를 완전히 덮도록 (더 큰 비율 기준)
+    const sc  = Math.max(vpW/iw, vpH/ih)
+    State.scale = sc
+    // 중앙 정렬
+    State.tx = (vpW - iw*sc)/2
+    State.ty = (vpH - ih*sc)/2
+    clampTranslate()
+    applyTransform()
+  }
+
+  function zoom(delta, cx, cy) {
+    const vpW = State.viewW = vp().clientWidth
+    const vpH = State.viewH = vp().clientHeight
+    cx = cx ?? vpW/2;  cy = cy ?? vpH/2
+    const oldScale = State.scale
+    // 최소: cover 스케일 / 최대: 8배
+    State.scale = Math.min(8, Math.max(minScale(), State.scale + delta))
+    const ratio = State.scale / oldScale
+    State.tx = cx - ratio*(cx - State.tx)
+    State.ty = cy - ratio*(cy - State.ty)
+    clampTranslate()
+    applyTransform()
+  }
+
+  function goHome() {
+    State.selectedBuilding = null
+    State.selectedFloor    = null
+    State.selectedExt      = null
+    document.querySelectorAll('.bld-overlay').forEach(el => el.classList.remove('selected'))
+    showView('home')
+    updateBreadcrumb()
+  }
+
+  function goToFloor() {
+    State.selectedExt = null
+    showFloorView(State.selectedBuilding, State.selectedFloor)
+  }
+
+  // init
+  function init() {
+    const img = document.getElementById('factory-img')
+    function onLoad() {
+      State.imgNaturalW = img.naturalWidth  || img.offsetWidth
+      State.imgNaturalH = img.naturalHeight || img.offsetHeight
+      State.viewW = vp().clientWidth
+      State.viewH = vp().clientHeight
+      resetView()
+      renderOverlays()
+    }
+    if (img.complete && img.naturalWidth) onLoad()
+    else img.addEventListener('load', onLoad)
+
+    // drag
+    vp().addEventListener('mousedown', e => {
+      if (e.target.closest('.bld-overlay')) return
+      // PolyTool 활성 시 drag 허용하되 PolyTool이 mousedown/up을 공유 처리
+      drag=true; sx=e.clientX; sy=e.clientY; ox=State.tx; oy=State.ty
+      if (!document.getElementById('poly-svg').classList.contains('active')) {
+        vp().classList.add('grabbing')
+      }
+    })
+    window.addEventListener('mousemove', e => {
+      if (!drag) return
+      State.tx = ox + (e.clientX-sx)
+      State.ty = oy + (e.clientY-sy)
+      clampTranslate(); applyTransform()
+    })
+    window.addEventListener('mouseup', () => { drag=false; vp().classList.remove('grabbing') })
+
+    // touch drag
+    let touches0=null
+    vp().addEventListener('touchstart', e => {
+      if (e.touches.length===1) {
+        const t=e.touches[0]; drag=true; sx=t.clientX; sy=t.clientY; ox=State.tx; oy=State.ty
+      } else if (e.touches.length===2) {
+        drag=false; touches0=e.touches
+      }
+    },{passive:true})
+    vp().addEventListener('touchmove', e => {
+      if (e.touches.length===1 && drag) {
+        const t=e.touches[0]
+        State.tx = ox+(t.clientX-sx); State.ty = oy+(t.clientY-sy)
+        clampTranslate(); applyTransform()
+      } else if (e.touches.length===2 && touches0) {
+        const d0=Math.hypot(touches0[0].clientX-touches0[1].clientX,touches0[0].clientY-touches0[1].clientY)
+        const d1=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY)
+        const cx=(e.touches[0].clientX+e.touches[1].clientX)/2
+        const cy=(e.touches[0].clientY+e.touches[1].clientY)/2
+        zoom((d1-d0)/State.imgNaturalW*State.scale, cx, cy)
+        touches0=e.touches
+      }
+    },{passive:true})
+    vp().addEventListener('touchend', () => { drag=false; touches0=null })
+
+    // wheel zoom
+    vp().addEventListener('wheel', e => {
+      e.preventDefault()
+      zoom(e.deltaY < 0 ? 0.15 : -0.15, e.clientX-vp().getBoundingClientRect().left, e.clientY-vp().getBoundingClientRect().top)
+    },{passive:false})
+
+    window.addEventListener('resize', resetView)
+  }
+
+  return { init, resetView, zoom: (d) => zoom(d), goHome, goToFloor }
+})()
+
+// ═══════════════════════════════════════════════════════════════════
+//  RENDER BUILDING OVERLAYS
+// ═══════════════════════════════════════════════════════════════════
+function renderOverlays() {
+  const layer = document.getElementById('overlays-layer')
+  layer.innerHTML = ''
+  const img = document.getElementById('factory-img')
+  const iw  = img.offsetWidth || State.imgNaturalW || 500
+
+  State.buildings.forEach(b => {
+    const exts = State.extinguishers.filter(e => e.buildingId === b.id)
+    const dangerCount   = exts.filter(e => e.status==='danger').length
+    const warningCount  = exts.filter(e => e.status==='warning').length
+
+    const div = document.createElement('div')
+    div.className = 'bld-overlay'
+    div.id = 'bld-' + b.id
+    div.style.left    = b.mapX + '%'
+    div.style.top     = b.mapY + '%'
+    div.style.width   = b.mapW + '%'
+    div.style.height  = b.mapH + '%'
+    div.style.background = b.color + '40'  // 25% opacity
+    div.style.borderColor = b.color
+
+    // label
+    const lbl = document.createElement('span')
+    lbl.className = 'bld-label'
+    lbl.textContent = b.shortName
+    div.appendChild(lbl)
+
+    // badge
+    if (dangerCount > 0 || warningCount > 0) {
+      const badge = document.createElement('div')
+      badge.className = 'bld-badge ' + (dangerCount>0?'bg-red-500':'bg-yellow-500')
+      badge.textContent = dangerCount>0 ? dangerCount : warningCount
+      div.appendChild(badge)
+    }
+
+    div.addEventListener('click', (e) => {
+      e.stopPropagation()
+      selectBuilding(b.id)
+      // zoom to building center
+      zoomToBuilding(b)
+    })
+    layer.appendChild(div)
+  })
+}
+
+function zoomToBuilding(b) {
+  const vpEl = document.getElementById('map-viewport')
+  const img  = document.getElementById('factory-img')
+  const iw   = State.imgNaturalW || img.naturalWidth || 2048
+  const ih   = State.imgNaturalH || img.naturalHeight || 1536
+  const vpW  = vpEl.clientWidth
+  const vpH  = vpEl.clientHeight
+
+  // 건물 중심에 줌 (건물 너비가 뷰포트의 ~40%를 차지하도록)
+  const targetScale = Math.min(8, Math.max(
+    Math.max(vpW/iw, vpH/ih),   // minScale (여백 방지)
+    Math.max(State.scale, (vpW * 0.4) / (b.mapW/100 * iw))
+  ))
+  State.scale = targetScale
+
+  // 건물 중심을 뷰포트 중앙으로
+  const bx = (b.mapX + b.mapW/2)/100 * iw * State.scale
+  const by = (b.mapY + b.mapH/2)/100 * ih * State.scale
+  State.tx = vpW/2 - bx
+  State.ty = vpH/2 - by
+
+  // 여백 없도록 clamp
+  const iws = iw * State.scale
+  const ihs = ih * State.scale
+  State.tx = Math.min(0, Math.max(vpW - iws, State.tx))
+  State.ty = Math.min(0, Math.max(vpH - ihs, State.ty))
+
+  document.getElementById('map-canvas').style.transition = 'transform 0.45s cubic-bezier(0.25,0.46,0.45,0.94)'
+  document.getElementById('map-canvas').style.transform  = \`translate(\${State.tx}px,\${State.ty}px) scale(\${State.scale})\`
+  setTimeout(() => { document.getElementById('map-canvas').style.transition = '' }, 460)
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  NAVIGATION
+// ═══════════════════════════════════════════════════════════════════
+function showView(name) {
+  document.querySelectorAll('.panel-view').forEach(v => v.classList.remove('active'))
+  document.getElementById('view-'+name).classList.add('active')
+}
+
+function updateBreadcrumb() {
+  const bc = document.getElementById('breadcrumb')
+  const b  = State.selectedBuilding
+  const f  = State.selectedFloor
+  const e  = State.selectedExt
+
+  let html = \`<span class="bc-item \${!b?'active':''}" onclick="App.goHome()"><i class="fas fa-map mr-1"></i>전체 지도</span>\`
+  if (b) {
+    html += \`<span class="text-slate-600">›</span>
+      <span class="bc-item \${b&&!f?'active':''}" onclick="selectBuilding('\${b.id}')">
+        \${b.name}
+      </span>\`
+  }
+  if (f) {
+    html += \`<span class="text-slate-600">›</span>
+      <span class="bc-item \${f&&!e?'active':''}" onclick="showFloorView(State.selectedBuilding,\${f})">
+        \${f}층
+      </span>\`
+  }
+  if (e) {
+    html += \`<span class="text-slate-600">›</span>
+      <span class="bc-item active">\${e.id}</span>\`
+  }
+  bc.innerHTML = html
+}
+
+function selectBuilding(bid) {
+  const b = State.buildings.find(b => b.id===bid)
+  if (!b) return
+  State.selectedBuilding = b
+  State.selectedFloor    = null
+  State.selectedExt      = null
+
+  // highlight
+  document.querySelectorAll('.bld-overlay').forEach(el => el.classList.remove('selected'))
+  const el = document.getElementById('bld-'+bid)
+  if (el) el.classList.add('selected')
+
+  // fill panel
+  const exts    = State.extinguishers.filter(e => e.buildingId===bid)
+  const danger  = exts.filter(e=>e.status==='danger').length
+  const warning = exts.filter(e=>e.status==='warning').length
+
+  document.getElementById('vb-icon').style.background = b.color
+  document.getElementById('vb-name').textContent = b.name
+  document.getElementById('vb-sub').textContent  = \`총 \${exts.length}개 소화기\`
+  document.getElementById('vb-total').textContent = exts.length
+  document.getElementById('vb-warn').textContent  = warning
+  document.getElementById('vb-danger').textContent = danger
+
+  // floor buttons
+  const fl = document.getElementById('floor-list')
+  fl.innerHTML = ''
+  for (let i=1; i<=b.floors; i++) {
+    const cnt = exts.filter(e=>e.floor===i)
+    const d = cnt.filter(e=>e.status==='danger').length
+    const w = cnt.filter(e=>e.status==='warning').length
+    const chip = d>0 ? \`<span class="text-red-400 text-xs font-bold">\${d}건 위험</span>\`
+                : w>0 ? \`<span class="text-yellow-400 text-xs font-bold">\${w}건 주의</span>\`
+                : \`<span class="text-green-400 text-xs">정상</span>\`
+    fl.innerHTML += \`<button onclick="showFloorView(State.selectedBuilding,\${i})"
+      class="bg-slate-700 hover:bg-slate-600 rounded-xl p-3 text-left transition border border-slate-600 hover:border-slate-400">
+      <div class="text-white font-bold text-sm">\${i}층</div>
+      <div class="text-gray-400 text-xs mt-0.5">\${cnt.length}개 소화기</div>
+      <div class="mt-1">\${chip}</div>
+    </button>\`
+  }
+
+  showView('building')
+  updateBreadcrumb()
+}
+
+function showFloorView(b, floor) {
+  if (!b) return
+  State.selectedBuilding = b
+  State.selectedFloor    = floor
+  State.selectedExt      = null
+
+  const exts = State.extinguishers.filter(e => e.buildingId===b.id && e.floor===floor)
+
+  document.getElementById('floor-ext-header').textContent = \`\${b.name} \${floor}층 소화기 목록 (\${exts.length}개)\`
+
+  // floor plan markers
+  const g = document.getElementById('fp-markers')
+  g.innerHTML = ''
+  // floor plan background label
+  const bg = document.getElementById('floor-plan-svg').querySelector('text')
+  if (bg) bg.textContent = \`\${b.name} \${floor}층 평면도\`
+
+  exts.forEach(ext => {
+    const cx = 20 + (ext.location.x/100)*360
+    const cy = 15 + (ext.location.y/100)*190
+    const col = {good:'#16a34a',warning:'#d97706',danger:'#dc2626'}[ext.status]
+    const mark = document.createElementNS('http://www.w3.org/2000/svg','g')
+    mark.innerHTML = \`
+      <circle class="fp-marker" cx="\${cx}" cy="\${cy}" r="9" fill="\${col}" stroke="white" stroke-width="1.5" onclick="selectExt('\${ext.id}')"/>
+      <text x="\${cx}" y="\${cy+4}" text-anchor="middle" fill="white" font-size="9" font-weight="bold" pointer-events="none">
+        <i class="fas fa-fire-extinguisher"></i>
+      </text>
+      <circle cx="\${cx}" cy="\${cy}" r="9" fill="none" stroke="\${col}" stroke-width="1.5" opacity="0.4">
+        \${ext.status==='danger'?'<animate attributeName="r" from="9" to="18" dur="1.5s" repeatCount="indefinite"/>':''} 
+        \${ext.status==='danger'?'<animate attributeName="opacity" from="0.6" to="0" dur="1.5s" repeatCount="indefinite"/>':''}
+      </circle>
+    \`
+    g.appendChild(mark)
+  })
+
+  // ext list
+  const list = document.getElementById('floor-ext-list')
+  list.innerHTML = exts.length===0
+    ? '<div class="text-gray-500 text-sm text-center py-6">이 층에 소화기가 없습니다</div>'
+    : exts.map(ext => {
+        const dday = calcDday(ext.nextInspection)
+        const ddayText = dday>0?'D-'+dday:dday===0?'D-Day':'D+'+Math.abs(dday)
+        const ddayColor = dday<0?'text-red-400':dday<=30?'text-yellow-400':'text-green-400'
+        return \`<div class="ext-card" id="card-\${ext.id}" onclick="selectExt('\${ext.id}')">
+          <span class="s-dot \${ext.status}"></span>
+          <div class="flex-1 min-w-0">
+            <div class="text-white text-sm font-semibold">\${ext.name}</div>
+            <div class="text-gray-400 text-xs">\${ext.type} \${ext.capacity}</div>
+          </div>
+          <div class="\${ddayColor} text-sm font-bold">\${ddayText}</div>
+        </div>\`
+      }).join('')
+
+  showView('floor')
+  updateBreadcrumb()
+}
+
+function selectExt(eid) {
+  const ext = State.extinguishers.find(e=>e.id===eid)
+  if (!ext) return
+  State.selectedExt = ext
+
+  const b = State.selectedBuilding
+  const dday = calcDday(ext.nextInspection)
+  const ddayText = dday>0?'D-'+dday:dday===0?'D-Day':'D+'+Math.abs(dday)
+  const col = {good:'#16a34a',warning:'#d97706',danger:'#dc2626'}[ext.status]
+  const statusLabel = {good:'✅ 정상',warning:'⚠️ 점검 주의',danger:'🚨 기한 초과'}[ext.status]
+  const chipClass = 'dday-chip '+ext.status
+
+  document.getElementById('ve-icon').style.background = col
+  document.getElementById('ve-name').textContent = ext.name
+  document.getElementById('ve-loc').textContent  = (b?.name||'') + ' ' + ext.floor + '층'
+  document.getElementById('ve-dday').textContent = ddayText
+  document.getElementById('ve-dday').style.color  = col
+  document.getElementById('ve-id').textContent   = ext.id
+  document.getElementById('ve-type').textContent = ext.type
+  document.getElementById('ve-cap').textContent  = ext.capacity
+  document.getElementById('ve-mfg').textContent  = ext.manufacture
+  document.getElementById('ve-last').textContent = ext.lastInspected
+  document.getElementById('ve-next').textContent = ext.nextInspection
+  document.getElementById('ve-inspector').textContent = ext.inspector
+  document.getElementById('ve-status-chip').innerHTML = \`<span class="\${chipClass}">\${statusLabel}</span>\`
+
+  // highlight card
+  document.querySelectorAll('.ext-card').forEach(c=>c.classList.remove('selected'))
+  const card = document.getElementById('card-'+eid)
+  if (card) card.classList.add('selected')
+
+  showView('ext')
+  updateBreadcrumb()
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  HOME VIEW
+// ═══════════════════════════════════════════════════════════════════
+function renderHomeView() {
+  const exts = State.extinguishers
+  document.getElementById('hs-total').textContent  = exts.length
+  document.getElementById('hs-warn').textContent   = exts.filter(e=>e.status==='warning').length
+  document.getElementById('hs-danger').textContent = exts.filter(e=>e.status==='danger').length
+  document.getElementById('ns-good').textContent   = exts.filter(e=>e.status==='good').length + ' 정상'
+  document.getElementById('ns-warn').textContent   = exts.filter(e=>e.status==='warning').length + ' 주의'
+  document.getElementById('ns-danger').textContent = exts.filter(e=>e.status==='danger').length + ' 위험'
+
+  const listEl = document.getElementById('home-bld-list')
+  listEl.innerHTML = State.buildings.map(b => {
+    const bexts = exts.filter(e=>e.buildingId===b.id)
+    const d = bexts.filter(e=>e.status==='danger').length
+    const w = bexts.filter(e=>e.status==='warning').length
+    const chip = d>0 ? \`<span class="text-red-400 text-xs font-bold ml-1">\${d}건 위험</span>\`
+               : w>0 ? \`<span class="text-yellow-400 text-xs font-bold ml-1">\${w}건 주의</span>\`
+               : \`<span class="text-green-400 text-xs ml-1">정상</span>\`
+    return \`<div onclick="selectBuildingById('\${b.id}')"
+      class="flex items-center gap-3 bg-slate-800 hover:bg-slate-700 rounded-xl p-3 cursor-pointer transition border border-slate-700 hover:border-slate-500">
+      <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background:\${b.color}">
+        <i class="fas fa-building text-white text-xs"></i>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="text-white text-sm font-semibold">\${b.name}</div>
+        <div class="text-gray-400 text-xs">\${b.floors}층 · 소화기 \${bexts.length}개\${chip}</div>
+      </div>
+      <i class="fas fa-chevron-right text-gray-500 text-xs"></i>
+    </div>\`
+  }).join('')
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  INSPECT FORM
+// ═══════════════════════════════════════════════════════════════════
+function openInspectForm() {
+  const d = new Date(); d.setMonth(d.getMonth()+6)
+  document.getElementById('form-next-date').value = d.toISOString().split('T')[0]
+  document.getElementById('inspect-modal').classList.remove('hidden')
+}
+function closeInspectForm() {
+  document.getElementById('inspect-modal').classList.add('hidden')
+}
+async function submitInspect() {
+  const inspector = document.getElementById('form-inspector').value.trim()
+  const nextDate  = document.getElementById('form-next-date').value
+  if (!inspector||!nextDate) { showToast('⚠️ 모든 항목을 입력해주세요'); return }
+  const ext = State.selectedExt
+  if (!ext) return
+  const res = await fetch('/api/extinguishers/'+ext.id+'/inspect',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({inspector, nextInspection:nextDate})
+  })
+  const data = await res.json()
+  if (data.success) {
+    const idx = State.extinguishers.findIndex(e=>e.id===ext.id)
+    State.extinguishers[idx] = data.extinguisher
+    State.selectedExt = data.extinguisher
+    closeInspectForm()
+    renderOverlays()
+    renderHomeView()
+    selectExt(ext.id)
+    showFloorView(State.selectedBuilding, State.selectedFloor) // refresh markers
+    setTimeout(()=>selectExt(ext.id),50)
+    showToast('✅ 점검이 기록되었습니다')
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  UTILS
+// ═══════════════════════════════════════════════════════════════════
+function calcDday(dateStr) {
+  const today=new Date(); today.setHours(0,0,0,0)
+  const t=new Date(dateStr); t.setHours(0,0,0,0)
+  return Math.ceil((t-today)/(1000*60*60*24))
+}
+function showToast(msg) {
+  const t=document.getElementById('toast')
+  t.textContent=msg; t.style.display='block'
+  clearTimeout(t._tid)
+  t._tid=setTimeout(()=>t.style.display='none',3000)
+}
+
+// home-list 클릭용 wrapper (전역 함수)
+function selectBuildingById(bid) {
+  const b = State.buildings.find(bb=>bb.id===bid)
+  if (!b) return
+  selectBuilding(bid)
+  zoomToBuilding(b)
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+//  POLYGON TOOL  (퍼센트 좌표 추출)
+// ═══════════════════════════════════════════════════════════════════
+const PolyTool = (() => {
+  let active   = false
+  let points   = []        // [{x, y}] % 좌표 (이미지 기준)
+  let closed   = false
+  let saved    = []        // [{name, points, closed}]
+  let mousePos = {x:0, y:0}
+
+  // 드래그 vs 클릭 구분용
+  let mouseDownPos = null
+  const DRAG_THRESHOLD = 5   // px 이상 움직이면 드래그로 판정
+
+  const svgEl     = () => document.getElementById('poly-svg')
+  const panelEl   = () => document.getElementById('poly-panel')
+  const btnEl     = () => document.getElementById('poly-tool-btn')
+  const outputEl  = () => document.getElementById('poly-coords-output')
+  const countEl   = () => document.getElementById('poly-count')
+  const savedBox  = () => document.getElementById('poly-saved-list')
+  const savedEl   = () => document.getElementById('poly-saved-items')
+  const nameInp   = () => document.getElementById('poly-name-input')
+  const ptsNumEl  = () => document.getElementById('poly-pts-num')
+  const closedTag = () => document.getElementById('poly-closed-tag')
+
+  // ── 이미지 기준 퍼센트 좌표 계산 ─────────────────────────
+  // map-viewport 좌표를 받아 factory-img 기준 %로 변환
+  function clientToPercent(clientX, clientY) {
+    const img = document.getElementById('factory-img')
+    const rect = img.getBoundingClientRect()
+    const x = (clientX - rect.left) / rect.width  * 100
+    const y = (clientY - rect.top)  / rect.height * 100
+    return {
+      x: Math.max(0, Math.min(100, +x.toFixed(2))),
+      y: Math.max(0, Math.min(100, +y.toFixed(2)))
+    }
+  }
+
+  // ── SVG 다시 그리기 ──────────────────────────────────────
+  function redraw() {
+    const s = svgEl()
+    s.innerHTML = ''
+
+    // 저장된 폴리곤들 (흐리게)
+    saved.forEach((item, si) => {
+      if (item.points.length < 2) return
+      const pts = item.points.map(p => p.x+','+p.y).join(' ')
+      const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon')
+      poly.setAttribute('points', pts)
+      poly.setAttribute('fill', 'rgba(124,58,237,0.10)')
+      poly.setAttribute('stroke', '#7c3aed')
+      poly.setAttribute('stroke-width', '0.4')
+      poly.setAttribute('stroke-dasharray', '1.5,1')
+      s.appendChild(poly)
+      // 라벨
+      const cx = item.points.reduce((a,p)=>a+p.x,0)/item.points.length
+      const cy = item.points.reduce((a,p)=>a+p.y,0)/item.points.length
+      const txt = document.createElementNS('http://www.w3.org/2000/svg','text')
+      txt.setAttribute('x', cx); txt.setAttribute('y', cy)
+      txt.setAttribute('text-anchor','middle'); txt.setAttribute('dominant-baseline','middle')
+      txt.setAttribute('fill','#c4b5fd'); txt.setAttribute('font-size','1.6')
+      txt.setAttribute('font-weight','700'); txt.setAttribute('paint-order','stroke')
+      txt.setAttribute('stroke','rgba(0,0,0,0.85)'); txt.setAttribute('stroke-width','0.6')
+      txt.textContent = item.name || ('구역'+(si+1))
+      s.appendChild(txt)
+    })
+
+    if (points.length === 0) return
+
+    // 현재 작업 폴리곤
+    if (points.length >= 2) {
+      const el = document.createElementNS('http://www.w3.org/2000/svg', closed ? 'polygon' : 'polyline')
+      el.setAttribute('points', points.map(p=>p.x+','+p.y).join(' '))
+      el.setAttribute('fill', closed ? 'rgba(99,102,241,0.22)' : 'none')
+      el.setAttribute('stroke', '#6366f1')
+      el.setAttribute('stroke-width', '0.55')
+      el.setAttribute('stroke-linejoin','round')
+      if (!closed) el.setAttribute('stroke-dasharray','2,1')
+      s.appendChild(el)
+    }
+
+    // 미리보기 선 (마우스까지)
+    if (!closed && points.length >= 1 && active) {
+      const last = points[points.length-1]
+      const ln = document.createElementNS('http://www.w3.org/2000/svg','line')
+      ln.setAttribute('x1', last.x); ln.setAttribute('y1', last.y)
+      ln.setAttribute('x2', mousePos.x); ln.setAttribute('y2', mousePos.y)
+      ln.setAttribute('stroke','rgba(99,102,241,0.45)')
+      ln.setAttribute('stroke-width','0.35')
+      ln.setAttribute('stroke-dasharray','1.5,1')
+      s.appendChild(ln)
+    }
+
+    // 점들
+    points.forEach((p, i) => {
+      const c = document.createElementNS('http://www.w3.org/2000/svg','circle')
+      c.setAttribute('cx', p.x); c.setAttribute('cy', p.y)
+      c.setAttribute('r', i===0 ? '1.2' : '0.85')
+      c.setAttribute('fill', i===0 ? '#f59e0b' : '#6366f1')
+      c.setAttribute('stroke', 'white'); c.setAttribute('stroke-width','0.3')
+      c.style.cursor = i===0 && points.length>=3 && !closed ? 'cell' : 'default'
+      if (i===0 && points.length>=3 && !closed) {
+        c.addEventListener('click', e => { e.stopPropagation(); closePoly() })
+      }
+      s.appendChild(c)
+      // 순번
+      const t = document.createElementNS('http://www.w3.org/2000/svg','text')
+      t.setAttribute('x', p.x); t.setAttribute('y', p.y - 1.4)
+      t.setAttribute('text-anchor','middle'); t.setAttribute('fill','#e2e8f0')
+      t.setAttribute('font-size','1.1'); t.setAttribute('font-weight','700')
+      t.setAttribute('paint-order','stroke'); t.setAttribute('stroke','rgba(0,0,0,0.9)')
+      t.setAttribute('stroke-width','0.6')
+      t.textContent = i+1
+      s.appendChild(t)
+    })
+  }
+
+  // ── 상태/출력 업데이트 ───────────────────────────────────
+  function updateOutput() {
+    const name = nameInp().value.trim() || 'zone'
+    const n = points.length
+    if (ptsNumEl()) ptsNumEl().textContent = n
+    if (closedTag()) {
+      if (closed) closedTag().classList.add('show')
+      else closedTag().classList.remove('show')
+    }
+    countEl().textContent = '점: '+n+'개'+(closed?' (닫힘)':n>0?' (열림)':'')
+
+    if (n === 0) {
+      outputEl().textContent = '📍 지도 위를 클릭하여 점을 추가하세요'
+      return
+    }
+
+    const minX = Math.min(...points.map(p=>p.x))
+    const minY = Math.min(...points.map(p=>p.y))
+    const maxX = Math.max(...points.map(p=>p.x))
+    const maxY = Math.max(...points.map(p=>p.y))
+
+    outputEl().textContent =
+      '// '+name+'\\n' +
+      'mapX:'+minX.toFixed(1)+', mapY:'+minY.toFixed(1)+',\\n' +
+      'mapW:'+(maxX-minX).toFixed(1)+', mapH:'+(maxY-minY).toFixed(1)+'\\n\\n' +
+      '// 폴리곤 points:\\n['+
+      points.map(p=>'['+p.x+','+p.y+']').join(', ')+
+      ']'
+  }
+
+  // ── 폴리곤 닫기 ─────────────────────────────────────────
+  function closePoly() {
+    if (points.length < 3) { showToast('⚠️ 점이 3개 이상 필요합니다'); return }
+    closed = true
+    redraw(); updateOutput()
+    showToast('✅ 폴리곤이 닫혔습니다')
+  }
+
+  // ── 이벤트 핸들러 ────────────────────────────────────────
+  let lastClickTime = 0
+
+  function onMouseDown(e) {
+    if (!active) return
+    mouseDownPos = { x: e.clientX, y: e.clientY }
+  }
+
+  function onMouseUp(e) {
+    if (!active || !mouseDownPos) return
+    const dx = Math.abs(e.clientX - mouseDownPos.x)
+    const dy = Math.abs(e.clientY - mouseDownPos.y)
+    mouseDownPos = null
+
+    // 드래그였으면 무시
+    if (dx > DRAG_THRESHOLD || dy > DRAG_THRESHOLD) return
+    // 건물 오버레이 클릭 무시
+    if (e.target.closest('.bld-overlay')) return
+    // 패널 클릭 무시
+    if (e.target.closest('#poly-panel') || e.target.closest('#poly-tool-btn')) return
+    if (closed) return
+
+    const now = Date.now()
+    // 더블클릭 → 닫기
+    if (now - lastClickTime < 300 && points.length >= 3) {
+      closePoly(); lastClickTime = 0; return
+    }
+    lastClickTime = now
+
+    const pt = clientToPercent(e.clientX, e.clientY)
+    points.push(pt)
+    redraw(); updateOutput()
+  }
+
+  function onMouseMove(e) {
+    if (!active) return
+    const pt = clientToPercent(e.clientX, e.clientY)
+    mousePos = pt
+    if (!closed) redraw()
+  }
+
+  // ── 토글 ─────────────────────────────────────────────────
+  function toggle() {
+    active = !active
+    const s = svgEl(); const b = btnEl(); const p = panelEl()
+    if (active) {
+      s.classList.add('active')
+      b.classList.add('active')
+      b.innerHTML = '<i class="fas fa-times"></i> 툴 종료'
+      p.classList.add('open')
+      // 드래그 충돌 없이 mouseup 기반으로 처리
+      const vp = document.getElementById('map-viewport')
+      vp.addEventListener('mousedown', onMouseDown)
+      vp.addEventListener('mouseup', onMouseUp)
+      vp.addEventListener('mousemove', onMouseMove)
+      showToast('📍 클릭으로 점을 추가하세요. 더블클릭 또는 첫번째 점 클릭으로 닫기')
+    } else {
+      s.classList.remove('active')
+      b.classList.remove('active')
+      b.innerHTML = '<i class="fas fa-draw-polygon"></i> 좌표 따기'
+      p.classList.remove('open')
+      const vp = document.getElementById('map-viewport')
+      vp.removeEventListener('mousedown', onMouseDown)
+      vp.removeEventListener('mouseup', onMouseUp)
+      vp.removeEventListener('mousemove', onMouseMove)
+    }
+  }
+
+  function undo() {
+    if (closed) { closed = false; redraw(); updateOutput(); return }
+    if (points.length === 0) return
+    points.pop()
+    redraw(); updateOutput()
+  }
+
+  function clear() {
+    points = []; closed = false
+    redraw(); updateOutput()
+    outputEl().textContent = '📍 지도 위를 클릭하여 점을 추가하세요'
+    countEl().textContent = '점: 0개'
+    if (ptsNumEl()) ptsNumEl().textContent = '0'
+    if (closedTag()) closedTag().classList.remove('show')
+  }
+
+  function save() {
+    if (points.length < 2) { showToast('⚠️ 점이 2개 이상 필요합니다'); return }
+    const name = nameInp().value.trim() || ('구역'+(saved.length+1))
+    saved.push({ name, points:[...points], closed })
+    renderSavedList()
+    showToast('✅ "'+name+'" 저장됨')
+    clear()
+    nameInp().value = ''
+  }
+
+  function copyJSON() {
+    const target = (saved.length > 0 && points.length === 0) ? saved
+      : [{ name: nameInp().value.trim()||'zone', points, closed }]
+    if (target[0].points.length === 0) { showToast('⚠️ 좌표가 없습니다'); return }
+    const json = JSON.stringify(target.map(s => ({
+      name: s.name,
+      points: s.points,
+      mapX: +Math.min(...s.points.map(p=>p.x)).toFixed(2),
+      mapY: +Math.min(...s.points.map(p=>p.y)).toFixed(2),
+      mapW: +(Math.max(...s.points.map(p=>p.x))-Math.min(...s.points.map(p=>p.x))).toFixed(2),
+      mapH: +(Math.max(...s.points.map(p=>p.y))-Math.min(...s.points.map(p=>p.y))).toFixed(2),
+    })), null, 2)
+    navigator.clipboard.writeText(json)
+      .then(()=>showToast('📋 JSON 복사됨!'))
+      .catch(()=>{
+        const ta=document.createElement('textarea')
+        ta.value=json; document.body.appendChild(ta); ta.select()
+        document.execCommand('copy'); document.body.removeChild(ta)
+        showToast('📋 JSON 복사됨!')
+      })
+  }
+
+  function renderSavedList() {
+    if (saved.length === 0) { savedBox().style.display='none'; return }
+    savedBox().style.display = 'block'
+    const container = savedEl()
+    container.innerHTML = ''
+    saved.forEach(function(item, i) {
+      const row = document.createElement('div')
+      row.className = 'saved-item'
+      const nameSpan = document.createElement('span')
+      nameSpan.className = 'saved-name'
+      nameSpan.innerHTML = '<i class="fas fa-vector-square" style="color:#7c3aed;margin-right:4px;font-size:9px"></i>'
+        + item.name
+        + '<span style="color:#475569;font-size:10px"> (' + item.points.length + '점)</span>'
+      const actions = document.createElement('div')
+      actions.className = 'saved-actions'
+      const editBtn = document.createElement('button')
+      editBtn.className = 'sa-btn'
+      editBtn.innerHTML = '<i class="fas fa-edit"></i>'
+      editBtn.onclick = function() { PolyTool.loadSaved(i) }
+      const copyBtn = document.createElement('button')
+      copyBtn.className = 'sa-btn'
+      copyBtn.innerHTML = '<i class="fas fa-copy"></i>'
+      copyBtn.onclick = function() { PolyTool.copySaved(i) }
+      const delBtn = document.createElement('button')
+      delBtn.className = 'sa-btn del'
+      delBtn.innerHTML = '<i class="fas fa-trash"></i>'
+      delBtn.onclick = function() { PolyTool.deleteSaved(i) }
+      actions.appendChild(editBtn)
+      actions.appendChild(copyBtn)
+      actions.appendChild(delBtn)
+      row.appendChild(nameSpan)
+      row.appendChild(actions)
+      container.appendChild(row)
+    })
+  }
+
+  function loadSaved(i) {
+    const item = saved[i]; if(!item) return
+    points = [...item.points]; closed = item.closed
+    nameInp().value = item.name
+    redraw(); updateOutput()
+    showToast('📂 "'+item.name+'" 불러옴')
+  }
+
+  function copySaved(i) {
+    const item = saved[i]; if(!item) return
+    const json = JSON.stringify({
+      name: item.name,
+      points: item.points,
+      mapX: +Math.min(...item.points.map(p=>p.x)).toFixed(2),
+      mapY: +Math.min(...item.points.map(p=>p.y)).toFixed(2),
+      mapW: +(Math.max(...item.points.map(p=>p.x))-Math.min(...item.points.map(p=>p.x))).toFixed(2),
+      mapH: +(Math.max(...item.points.map(p=>p.y))-Math.min(...item.points.map(p=>p.y))).toFixed(2),
+    }, null, 2)
+    navigator.clipboard.writeText(json)
+      .then(()=>showToast('📋 "'+item.name+'" 복사됨'))
+      .catch(()=>{
+        const ta=document.createElement('textarea'); ta.value=json
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy')
+        document.body.removeChild(ta); showToast('📋 "'+item.name+'" 복사됨')
+      })
+  }
+
+  function deleteSaved(i) {
+    saved.splice(i,1); renderSavedList(); redraw()
+    showToast('🗑️ 삭제됨')
+  }
+
+  return { toggle, undo, clear, save, closePoly, copyJSON, loadSaved, copySaved, deleteSaved }
+})()
+
+// ═══════════════════════════════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════════════════════════════
+async function boot() {
+  const [buildings, exts] = await Promise.all([
+    fetch('/api/buildings').then(r=>r.json()),
+    fetch('/api/extinguishers').then(r=>r.json()),
+  ])
+  State.buildings      = buildings
+  State.extinguishers  = exts
+  renderHomeView()
+  App.init()
+  // hide hint after 4s
+  setTimeout(()=>{
+    const h=document.getElementById('map-hint')
+    h.style.transition='opacity 1s'; h.style.opacity='0'
+    setTimeout(()=>h.style.display='none',1000)
+  },4000)
+}
+boot()
+</script>
+</body>
+</html>`
 
 export default app
