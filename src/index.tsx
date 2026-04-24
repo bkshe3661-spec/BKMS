@@ -1595,6 +1595,7 @@ app.get('/master', (c) => {
     .badge-good    { background:#064e3b; color:#34d399; }
     .badge-replace { background:#450a0a; color:#f87171; }
     .badge-check   { background:#422006; color:#fb923c; }
+    .badge-defect  { background:#450a0a; color:#f87171; }
     .badge-normal  { background:#1e3a5f; color:#60a5fa; }
     @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
     .animate-in { animation: fadeIn 0.35s ease both; }
@@ -1831,11 +1832,16 @@ app.get('/master', (c) => {
 
   /** 표시용 상태 계산 */
   function calcDisplayStatus(item) {
+    // 1순위: 제조 10년 초과 → 교체대상
     const mo = monthsElapsed(item.mfgYm);
     if (mo >= REPLACE_MONTHS) return 'replace';
+    // 2순위: 점검 결과 비정상 항목 존재 → 불량
+    if (item.defect === true) return 'defect';
+    // 3순위: 최근 점검일 30일 이내 → 양호
     const days = daysElapsed(item.lastInspectionDate);
-    if (days >= INSPECT_DAYS) return 'check';
-    return 'good';
+    if (days < INSPECT_DAYS) return 'good';
+    // 4순위: 30일 초과 또는 미점검 → 점검 필요
+    return 'check';
   }
 
   /** 오늘 기준 랜덤 날짜(0~60일 전) 생성 */
@@ -1879,6 +1885,7 @@ app.get('/master', (c) => {
   function StatusBadge({ item }) {
     const st = calcDisplayStatus(item);
     if (st === 'replace') return <span className="badge badge-replace"><i className="fas fa-triangle-exclamation mr-1"></i>교체대상</span>;
+    if (st === 'defect')  return <span className="badge badge-defect"><i className="fas fa-circle-xmark mr-1"></i>불량</span>;
     if (st === 'check')   return <span className="badge badge-check"><i className="fas fa-clock mr-1"></i>점검 필요</span>;
     return <span className="badge badge-good"><i className="fas fa-circle-check mr-1"></i>양호</span>;
   }
@@ -1889,8 +1896,9 @@ app.get('/master', (c) => {
   function SummaryCards({ items, activeFilter, onFilterChange }) {
     const total   = items.length;
     const replace = items.filter(i => calcDisplayStatus(i) === 'replace').length;
+    const defect  = items.filter(i => calcDisplayStatus(i) === 'defect').length;
     const check   = items.filter(i => calcDisplayStatus(i) === 'check').length;
-    const good    = total - replace - check;
+    const good    = total - replace - defect - check;
 
     const cards = [
       { label:'전체 소화기', value:total,   icon:'fa-fire-extinguisher',   filterKey:'all',     color:'from-blue-600 to-blue-800',       ring:'ring-blue-400',    textColor:'text-blue-200',   valueColor:'text-white' },
@@ -2031,15 +2039,136 @@ app.get('/master', (c) => {
   }
 
   // ═══════════════════════════════════════════════════════════════
+  //  점검 체크리스트 모달
+  // ═══════════════════════════════════════════════════════════════
+  const CHECK_ITEMS = [
+    { key: 'pin',      label: '안전핀 및 봉인 상태 확인' },
+    { key: 'gauge',    label: '압력계(게이지) 정상 범위 확인' },
+    { key: 'hose',     label: '호스 및 노즐 파손 여부 확인' },
+    { key: 'body',     label: '본체 부식, 변형, 누출 여부 확인' },
+  ];
+
+  function InspectModal({ item, onComplete, onClose }) {
+    // 각 항목의 결과: true = 정상, false = 비정상
+    const [results, setResults] = useState(
+      Object.fromEntries(CHECK_ITEMS.map(c => [c.key, true]))
+    );
+
+    const hasDefect = Object.values(results).some(v => v === false);
+
+    function handleSubmit() {
+      onComplete(item.id, hasDefect);
+    }
+
+    return (
+      <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+        <div className="modal-box animate-in">
+          {/* 헤더 */}
+          <div className="flex items-start justify-between mb-1">
+            <div>
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <i className="fas fa-clipboard-check text-blue-400"></i>
+                소화기 점검
+              </h2>
+              <p className="text-slate-400 text-xs mt-1">
+                항목별로 정상 여부를 선택하면 점검 결과가 자동으로 갱신됩니다.
+              </p>
+            </div>
+            <button onClick={onClose} className="text-slate-400 hover:text-white transition text-xl ml-4 mt-0.5">
+              <i className="fas fa-xmark"></i>
+            </button>
+          </div>
+
+          {/* 소화기 정보 */}
+          <div className="bg-slate-800 rounded-lg px-4 py-3 mb-5 mt-4 flex items-center gap-3">
+            <div className="w-8 h-8 bg-red-700 rounded-full flex items-center justify-center shrink-0">
+              <i className="fas fa-fire-extinguisher text-white text-sm"></i>
+            </div>
+            <div>
+              <div className="text-sm font-semibold text-white">{item.location || '-'}</div>
+              <div className="text-xs text-slate-400">{item.type || '-'} &nbsp;·&nbsp; 제조 {item.mfgYm || '-'} &nbsp;·&nbsp; BK-FE-{String(item.id).padStart(3,'0')}</div>
+            </div>
+          </div>
+
+          {/* 점검 항목 */}
+          <div className="space-y-3 mb-6">
+            {CHECK_ITEMS.map((ci, idx) => (
+              <div key={ci.key}
+                className={"rounded-lg border px-4 py-3 flex items-center justify-between transition-colors "
+                  + (results[ci.key] === false
+                    ? "border-red-600 bg-red-950/40"
+                    : "border-slate-700 bg-slate-800/60")}>
+                <div className="flex items-center gap-2.5">
+                  <span className={"w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0 "
+                    + (results[ci.key] === false ? "bg-red-600 text-white" : "bg-slate-600 text-slate-300")}>
+                    {idx + 1}
+                  </span>
+                  <span className={"text-sm " + (results[ci.key] === false ? "text-red-300" : "text-slate-200")}>
+                    {ci.label}
+                  </span>
+                </div>
+                <div className="flex gap-2 shrink-0 ml-3">
+                  <label className={"flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer border text-xs font-semibold transition-colors "
+                    + (results[ci.key] === true
+                      ? "bg-emerald-700 border-emerald-500 text-white"
+                      : "bg-slate-700 border-slate-600 text-slate-400 hover:border-emerald-600")}>
+                    <input type="radio" name={ci.key} className="hidden"
+                      checked={results[ci.key] === true}
+                      onChange={() => setResults(r => ({...r, [ci.key]: true}))} />
+                    <i className="fas fa-circle-check"></i> 정상
+                  </label>
+                  <label className={"flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer border text-xs font-semibold transition-colors "
+                    + (results[ci.key] === false
+                      ? "bg-red-700 border-red-500 text-white"
+                      : "bg-slate-700 border-slate-600 text-slate-400 hover:border-red-600")}>
+                    <input type="radio" name={ci.key} className="hidden"
+                      checked={results[ci.key] === false}
+                      onChange={() => setResults(r => ({...r, [ci.key]: false}))} />
+                    <i className="fas fa-circle-xmark"></i> 비정상
+                  </label>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* 결과 요약 */}
+          <div className={"rounded-lg px-4 py-3 mb-5 flex items-center gap-2 text-sm font-medium "
+            + (hasDefect ? "bg-red-900/50 text-red-300 border border-red-700" : "bg-emerald-900/40 text-emerald-300 border border-emerald-700")}>
+            <i className={"fas " + (hasDefect ? "fa-triangle-exclamation" : "fa-circle-check")}></i>
+            {hasDefect
+              ? '비정상 항목이 있습니다. 점검 완료 시 불량으로 기록됩니다.'
+              : '모든 항목 정상 — 점검 완료 시 양호로 갱신됩니다.'}
+          </div>
+
+          {/* 버튼 */}
+          <div className="flex gap-3">
+            <button onClick={handleSubmit}
+              className={"flex-1 font-semibold py-2.5 rounded-lg transition text-white "
+                + (hasDefect ? "bg-red-600 hover:bg-red-500" : "bg-blue-600 hover:bg-blue-500")}>
+              <i className={"fas mr-2 " + (hasDefect ? "fa-triangle-exclamation" : "fa-clipboard-check")}></i>
+              점검 완료
+            </button>
+            <button onClick={onClose}
+              className="flex-1 bg-slate-600 hover:bg-slate-500 text-white font-semibold py-2.5 rounded-lg transition">
+              취소
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
   //  메인 앱
   // ═══════════════════════════════════════════════════════════════
   function App() {
-    const [items,    setItems]    = useState([]);
-    const [search,   setSearch]   = useState('');
-    const [filter,   setFilter]   = useState('all');  // all | good | replace | check
-    const [editItem, setEditItem] = useState(null);   // null | {} | item
-    const [delItem,  setDelItem]  = useState(null);
-    const [toast,    setToast]    = useState(null);
+    const [items,       setItems]       = useState([]);
+    const [search,      setSearch]      = useState('');
+    const [filter,      setFilter]      = useState('all');  // all | good | replace | check | defect
+    const [editItem,    setEditItem]    = useState(null);
+    const [delItem,     setDelItem]     = useState(null);
+    const [inspectItem, setInspectItem] = useState(null);   // 점검 모달 대상
+    const [toast,       setToast]       = useState(null);
 
     // 초기 로드
     useEffect(() => { setItems(initStorage()); }, []);
@@ -2106,6 +2235,23 @@ app.get('/master', (c) => {
       showToast('삭제되었습니다.', 'error');
     }
 
+    // 점검 완료 처리
+    function handleInspectComplete(itemId, hasDefect) {
+      const today = new Date().toISOString().slice(0, 10);
+      const updated = items.map(i =>
+        i.id === itemId
+          ? { ...i, lastInspectionDate: today, defect: hasDefect }
+          : i
+      );
+      saveStorage(updated);
+      setItems(updated);
+      setInspectItem(null);
+      showToast(
+        hasDefect ? '⚠️ 점검 완료 – 비정상 항목이 기록되었습니다.' : '✅ 점검 완료 – 양호 상태로 갱신되었습니다.',
+        hasDefect ? 'error' : 'success'
+      );
+    }
+
     function handleReset() {
       if (!confirm('초기 데이터로 리셋하시겠습니까? 현재 데이터가 모두 삭제됩니다.')) return;
       const seeded = INITIAL_DATA.map(item => ({ ...item, lastInspectionDate: randomRecentDate() }));
@@ -2118,6 +2264,7 @@ app.get('/master', (c) => {
       { v:'all',     label:'전체' },
       { v:'good',    label:'양호' },
       { v:'check',   label:'점검 필요' },
+      { v:'defect',  label:'불량' },
       { v:'replace', label:'교체 대상' },
     ];
 
@@ -2242,8 +2389,12 @@ app.get('/master', (c) => {
                         </td>
                         <td className="px-4 py-3 text-center">
                           <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => setInspectItem(item)}
+                              className="text-xs font-semibold bg-blue-700 hover:bg-blue-600 text-white px-2 py-1 rounded transition" title="점검하기">
+                              <i className="fas fa-clipboard-check mr-1"></i>점검
+                            </button>
                             <button onClick={() => handleEdit(item)}
-                              className="text-slate-400 hover:text-blue-400 transition p-1.5 rounded hover:bg-blue-900/30" title="수정">
+                              className="text-slate-400 hover:text-amber-400 transition p-1.5 rounded hover:bg-amber-900/30" title="수정">
                               <i className="fas fa-pen text-xs"></i>
                             </button>
                             <button onClick={() => handleDelete(item)}
@@ -2274,6 +2425,9 @@ app.get('/master', (c) => {
         )}
         {delItem && (
           <DeleteModal item={delItem} onConfirm={confirmDelete} onClose={() => setDelItem(null)} />
+        )}
+        {inspectItem && (
+          <InspectModal item={inspectItem} onComplete={handleInspectComplete} onClose={() => setInspectItem(null)} />
         )}
 
         {/* 토스트 */}
