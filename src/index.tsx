@@ -2167,8 +2167,15 @@ app.get('/master', (c) => {
     const [filter,      setFilter]      = useState('all');  // all | good | replace | check | defect
     const [editItem,    setEditItem]    = useState(null);
     const [delItem,     setDelItem]     = useState(null);
-    const [inspectItem, setInspectItem] = useState(null);   // 점검 모달 대상
+    const [inspectItem, setInspectItem] = useState(null);
+    const [activeTab,   setActiveTab]   = useState('extinguisher'); // extinguisher | bagfilter | hazard
     const [toast,       setToast]       = useState(null);
+
+    const TABS = [
+      { key: 'extinguisher', label: '소화기',         icon: 'fa-fire-extinguisher' },
+      { key: 'bagfilter',    label: '백필터',          icon: 'fa-wind' },
+      { key: 'hazard',       label: '유해위험기계기구', icon: 'fa-gear' },
+    ];
 
     // 초기 로드
     useEffect(() => { setItems(initStorage()); }, []);
@@ -2270,35 +2277,67 @@ app.get('/master', (c) => {
 
     return (
       <div className="min-h-screen bg-slate-900 text-slate-200">
-        {/* 상단 헤더 */}
-        <header className="bg-slate-950 border-b border-slate-800 px-6 py-4 sticky top-0 z-30">
-          <div className="max-w-7xl mx-auto flex items-center justify-between">
+        {/* ── GNB ── */}
+        <header className="bg-slate-950 border-b border-slate-800 sticky top-0 z-30">
+          {/* 1행: 로고 + 시스템명 + 우측 액션 */}
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+            {/* 좌: 로고 + BKMS */}
             <div className="flex items-center gap-3">
-              <a href="/" className="text-slate-400 hover:text-white transition text-sm mr-2">
+              <a href="/" className="text-slate-500 hover:text-slate-300 transition text-sm">
                 <i className="fas fa-arrow-left"></i>
               </a>
-              <div className="w-9 h-9 bg-red-600 rounded-lg flex items-center justify-center">
-                <i className="fas fa-fire-extinguisher text-white text-base"></i>
-              </div>
-              <div>
-                <h1 className="font-bold text-white text-base leading-tight">태경BK 단양1공장</h1>
-                <p className="text-slate-400 text-xs">소화기 마스터 데이터 관리</p>
+              <div className="flex items-center gap-2.5">
+                {/* 임시 로고 아이콘 */}
+                <div className="w-8 h-8 rounded-md bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow">
+                  <i className="fas fa-shield-halved text-white text-sm"></i>
+                </div>
+                <span className="text-xl font-extrabold tracking-tight text-white">BKMS</span>
+                <span className="hidden sm:block text-slate-600 text-sm ml-1">|</span>
+                <span className="hidden sm:block text-slate-400 text-xs">태경비케이 단양1공장</span>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <button onClick={handleReset}
-                className="text-xs text-slate-400 hover:text-slate-200 border border-slate-700 hover:border-slate-500 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
-                <i className="fas fa-rotate-left"></i><span className="hidden sm:inline">초기화</span>
+            {/* 우: 액션 버튼 (소화기 탭일 때만) */}
+            {activeTab === 'extinguisher' && (
+              <div className="flex items-center gap-2">
+                <button onClick={handleReset}
+                  className="text-xs text-slate-400 hover:text-slate-200 border border-slate-700 hover:border-slate-500 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
+                  <i className="fas fa-rotate-left"></i>
+                  <span className="hidden sm:inline">초기화</span>
+                </button>
+                <button onClick={handleAdd}
+                  className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2 shadow">
+                  <i className="fas fa-plus"></i>소화기 추가
+                </button>
+              </div>
+            )}
+          </div>
+          {/* 2행: 메인 메뉴 탭 */}
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-end gap-0 border-t border-slate-800">
+            {TABS.map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={
+                  "px-5 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 "
+                  + (activeTab === tab.key
+                    ? "border-blue-400 text-blue-300"
+                    : "border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-500")
+                }>
+                <i className={"fas " + tab.icon + " text-xs"}></i>
+                {tab.label}
               </button>
-              <button onClick={handleAdd}
-                className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2 shadow">
-                <i className="fas fa-plus"></i>소화기 추가
-              </button>
-            </div>
+            ))}
           </div>
         </header>
 
-        {/* 본문 */}
+        {/* ── 탭별 본문 ── */}
+        {activeTab !== 'extinguisher' ? (
+          <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-slate-500">
+            <i className="fas fa-screwdriver-wrench text-5xl opacity-30"></i>
+            <p className="text-lg font-medium">준비 중인 화면입니다.</p>
+            <p className="text-sm opacity-60">{TABS.find(t=>t.key===activeTab)?.label} 기능은 현재 개발 중입니다.</p>
+          </div>
+        ) : (
         <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
 
           {/* 요약 카드 */}
@@ -2341,7 +2380,7 @@ app.get('/master', (c) => {
                     <th className="px-4 py-3 text-left">설치 위치</th>
                     <th className="px-4 py-3 text-left">소화기 종류</th>
                     <th className="px-4 py-3 text-center">제조년월</th>
-                    <th className="px-4 py-3 text-center">경과(월)</th>
+                    <th className="px-4 py-3 text-center">교체 년월</th>
                     <th className="px-4 py-3 text-center">최근 점검일</th>
                     <th className="px-4 py-3 text-center">상태</th>
                     <th className="px-4 py-3 text-center">담당자</th>
@@ -2352,7 +2391,7 @@ app.get('/master', (c) => {
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={11} className="text-center py-16 text-slate-500">
+                      <td colSpan={10} className="text-center py-16 text-slate-500">
                         <i className="fas fa-inbox text-3xl mb-3 block opacity-40"></i>
                         검색 결과가 없습니다.
                       </td>
@@ -2374,8 +2413,8 @@ app.get('/master', (c) => {
                         </td>
                         <td className={"px-4 py-3 " + cellCls}>{item.type || '-'}</td>
                         <td className={"px-4 py-3 text-center " + cellCls}>{item.mfgYm || '-'}</td>
-                        <td className={"px-4 py-3 text-center font-mono " + (mo >= REPLACE_MONTHS ? "text-red-400 font-bold" : mo >= 90 ? "text-amber-400" : "text-slate-300")}>
-                          {mo}
+                        <td className={"px-4 py-3 text-center font-mono text-xs " + (mo >= REPLACE_MONTHS ? "text-red-400 font-bold" : mo >= 90 ? "text-amber-400" : "text-slate-400")}>
+                          {(() => { const d = item.mfgYm ? item.mfgYm.replace(/^(\d{4})(\..+)$/, (_, y, rest) => (parseInt(y)+10) + rest) : '-'; return d; })()}
                         </td>
                         <td className={"px-4 py-3 text-center " + (daysElapsed(item.lastInspectionDate) >= INSPECT_DAYS ? "text-amber-400" : "text-slate-300")}>
                           {item.lastInspectionDate || '-'}
@@ -2418,6 +2457,7 @@ app.get('/master', (c) => {
             <span><i className="fas fa-triangle-exclamation text-red-400 mr-1"></i>교체 대상: 제조 후 120개월(10년) 이상 경과 → 빨간색 강조</span>
           </div>
         </main>
+        )} {/* end activeTab === 'extinguisher' */}
 
         {/* 모달 */}
         {editItem !== null && (
