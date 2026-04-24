@@ -1845,6 +1845,16 @@ app.get('/master', (c) => {
   }
 
   /** 오늘 기준 랜덤 날짜(0~60일 전) 생성 */
+  /** 제조년월(YYYY.MM)에서 10년 후 교체년월 계산 */
+  function calcReplaceYm(mfgYm) {
+    if (!mfgYm) return '-';
+    const parts = mfgYm.split('.');
+    if (parts.length < 2) return '-';
+    const year = parseInt(parts[0], 10);
+    if (isNaN(year)) return '-';
+    return (year + 10) + '.' + parts[1];
+  }
+
   function randomRecentDate() {
     const d = new Date();
     d.setDate(d.getDate() - Math.floor(Math.random() * 60));
@@ -1904,11 +1914,12 @@ app.get('/master', (c) => {
       { label:'전체 소화기', value:total,   icon:'fa-fire-extinguisher',   filterKey:'all',     color:'from-blue-600 to-blue-800',       ring:'ring-blue-400',    textColor:'text-blue-200',   valueColor:'text-white' },
       { label:'양호',        value:good,    icon:'fa-circle-check',         filterKey:'good',    color:'from-emerald-600 to-emerald-800', ring:'ring-emerald-400', textColor:'text-emerald-200', valueColor:'text-white' },
       { label:'점검 필요',   value:check,   icon:'fa-clock',                filterKey:'check',   color:'from-amber-600 to-amber-800',     ring:'ring-amber-400',   textColor:'text-amber-200',  valueColor:'text-white' },
+      { label:'불량',        value:defect,  icon:'fa-circle-xmark',         filterKey:'defect',  color:'from-purple-700 to-purple-900',   ring:'ring-purple-400',  textColor:'text-purple-200', valueColor:'text-white' },
       { label:'교체 대상',   value:replace, icon:'fa-triangle-exclamation', filterKey:'replace', color:'from-red-700 to-red-900',         ring:'ring-red-400',     textColor:'text-red-200',    valueColor:'text-white' },
     ];
 
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
         {cards.map((c, i) => {
           const isActive = activeFilter === c.filterKey;
           return (
@@ -2267,14 +2278,6 @@ app.get('/master', (c) => {
       showToast('초기 데이터로 리셋되었습니다.', 'success');
     }
 
-    const FILTER_OPTS = [
-      { v:'all',     label:'전체' },
-      { v:'good',    label:'양호' },
-      { v:'check',   label:'점검 필요' },
-      { v:'defect',  label:'불량' },
-      { v:'replace', label:'교체 대상' },
-    ];
-
     return (
       <div className="min-h-screen bg-slate-900 text-slate-200">
         {/* ── GNB ── */}
@@ -2343,23 +2346,12 @@ app.get('/master', (c) => {
           {/* 요약 카드 */}
           <SummaryCards items={items} activeFilter={filter} onFilterChange={setFilter} />
 
-          {/* 검색 + 필터 바 */}
-          <div className="flex flex-col sm:flex-row gap-3 mb-4">
-            <div className="relative flex-1">
+          {/* 검색 바 */}
+          <div className="flex mb-4">
+            <div className="relative flex-1 max-w-md">
               <i className="fas fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
               <input type="text" value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="위치, 종류, 담당자 검색..." className="w-full pl-9 pr-4 py-2 text-sm" />
-            </div>
-            <div className="flex gap-2 flex-wrap">
-              {FILTER_OPTS.map(o => (
-                <button key={o.v} onClick={() => setFilter(o.v)}
-                  className={"text-xs font-medium px-3 py-2 rounded-lg border transition " +
-                    (filter === o.v
-                      ? 'bg-blue-600 border-blue-500 text-white'
-                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500')}>
-                  {o.label}
-                </button>
-              ))}
             </div>
           </div>
 
@@ -2414,7 +2406,7 @@ app.get('/master', (c) => {
                         <td className={"px-4 py-3 " + cellCls}>{item.type || '-'}</td>
                         <td className={"px-4 py-3 text-center " + cellCls}>{item.mfgYm || '-'}</td>
                         <td className={"px-4 py-3 text-center font-mono text-xs " + (mo >= REPLACE_MONTHS ? "text-red-400 font-bold" : mo >= 90 ? "text-amber-400" : "text-slate-400")}>
-                          {(() => { const d = item.mfgYm ? item.mfgYm.replace(/^(\d{4})(\..+)$/, (_, y, rest) => (parseInt(y)+10) + rest) : '-'; return d; })()}
+                          {calcReplaceYm(item.mfgYm)}
                         </td>
                         <td className={"px-4 py-3 text-center " + (daysElapsed(item.lastInspectionDate) >= INSPECT_DAYS ? "text-amber-400" : "text-slate-300")}>
                           {item.lastInspectionDate || '-'}
