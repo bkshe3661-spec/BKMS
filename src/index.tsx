@@ -1901,6 +1901,419 @@ app.get('/master', (c) => {
   }
 
   // ═══════════════════════════════════════════════════════════════
+  //  공장 도면 뷰 (FloorPlanView)
+  // ═══════════════════════════════════════════════════════════════
+
+  // 건물 목록 (1-Depth)
+  const BUILDINGS = [
+    { id: 'admin',    name: '관리동',    color: '#8b5cf6', desc: '사무동 1층 – 총무팀, 구매파트, 회의실 등' },
+    { id: 'welfare',  name: '복지동',    color: '#06b6d4', desc: '복지시설, 식당, 휴게 공간' },
+    { id: 'main',     name: '메인공장',  color: '#f59e0b', desc: '생산1파트, 생산2파트, 생산설비' },
+    { id: 'warehouse',name: '창고동',    color: '#10b981', desc: '제품창고 A/B/C, 출하관리' },
+    { id: 'utility',  name: '유틸리티',  color: '#f97316', desc: '공무파트, 장비, 유틸리티센터' },
+    { id: 'guard',    name: '경비실',    color: '#64748b', desc: '정문 경비실' },
+  ];
+
+  // 건물별 소화기 필터링 (location에 건물명 포함 여부)
+  function getItemsForBuilding(items, buildingId) {
+    const b = BUILDINGS.find(b => b.id === buildingId);
+    if (!b) return [];
+    const keywords = {
+      admin:     ['관리동','총무팀','구매파트','회의실','문서고','다용도','생산지원','대표이사','접견'],
+      welfare:   ['복지동','식당','휴게'],
+      main:      ['생산1파트','생산2파트','메인공장','SK','AK','CK','소석회','고반응','과립','A동 콤프','고토','비료'],
+      warehouse: ['창고','출하','제품'],
+      utility:   ['유틸','공무','장비','컴프레샤'],
+      guard:     ['경비실'],
+    };
+    const kws = keywords[buildingId] || [];
+    return items.filter(item =>
+      kws.some(k => (item.location || '').includes(k))
+    );
+  }
+
+  // 도면 이미지 (건물별 임시 도면 – 관리동은 실제 업로드 이미지 사용)
+  const FLOOR_PLANS = {
+    admin:     '/static/floor_admin.png',
+    welfare:   null,
+    main:      null,
+    warehouse: null,
+    utility:   null,
+    guard:     null,
+  };
+
+  function FloorPlanView({ items, setItems, onEdit, onInspect, showToast }) {
+    const [selectedBuilding, setSelectedBuilding] = React.useState(null); // null = 1-Depth
+    const [placingItem, setPlacingItem]           = React.useState(null); // 좌표 배치 대기중 item
+    const [pendingForm, setPendingForm]            = React.useState(null); // 모달 저장 완료된 form
+    const [addModal, setAddModal]                  = React.useState(false);
+    const imgRef = React.useRef(null);
+
+    // 현재 건물의 소화기 목록
+    const buildingItems = selectedBuilding
+      ? getItemsForBuilding(items, selectedBuilding.id)
+      : [];
+
+    // 도면 위 소화기 아이콘: mapX, mapY(%) 가진 것만
+    const placedItems = buildingItems.filter(i => i.mapX != null && i.mapY != null);
+
+    // 소화기 추가 버튼 클릭 → 모달 열기
+    function handleAddClick() { setAddModal(true); }
+
+    // 모달에서 저장 완료 → 좌표 배치 대기
+    function handleFormSave(form) {
+      setAddModal(false);
+      setPendingForm(form);
+      setPlacingItem(true); // 배치 모드 ON
+    }
+
+    // 도면 클릭 → 좌표 계산 후 저장
+    function handleMapClick(e) {
+      if (!placingItem || !imgRef.current) return;
+      const rect = imgRef.current.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width  * 100).toFixed(2);
+      const y = ((e.clientY - rect.top)  / rect.height * 100).toFixed(2);
+
+      // items에 저장
+      const newId   = Math.max(0, ...items.map(i => i.id)) + 1;
+      const newItem = {
+        ...pendingForm,
+        id: newId,
+        mapX: parseFloat(x),
+        mapY: parseFloat(y),
+        buildingId: selectedBuilding.id,
+        lastInspectionDate: new Date().toISOString().slice(0,10),
+      };
+      const updated = [...items, newItem];
+      const STORAGE_KEY_LOCAL = 'tkbk_extinguishers_master';
+      localStorage.setItem(STORAGE_KEY_LOCAL, JSON.stringify(updated));
+      setItems(updated);
+      setPlacingItem(false);
+      setPendingForm(null);
+      showToast('소화기가 도면에 배치되었습니다.', 'success');
+    }
+
+    // 아이콘 색상 (상태별)
+    function iconColor(item) {
+      const st = calcDisplayStatus(item);
+      if (st === 'replace') return '#dc2626';
+      if (st === 'defect')  return '#7e22ce';
+      if (st === 'check')   return '#d97706';
+      return '#16a34a';
+    }
+
+    // ── 1-Depth: 건물 선택 화면 ──
+    if (!selectedBuilding) {
+      return (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+          <div className="mb-5">
+            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+              <i className="fas fa-map text-blue-500"></i>공장 전체 도면
+            </h2>
+            <p className="text-sm text-gray-500 mt-1">건물을 선택하면 해당 비상대피도가 표시됩니다.</p>
+          </div>
+
+          {/* 전체 공장 조감도 (임시) */}
+          <div className="relative bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mb-6">
+            <div className="bg-gray-100 text-center py-3 text-xs text-gray-500 font-medium border-b border-gray-200">
+              <i className="fas fa-layer-group mr-1"></i>태경BK 단양1공장 – 전체 배치도 (클릭하여 건물 상세 진입)
+            </div>
+            {/* 공장 조감도 임시 레이아웃 */}
+            <div className="relative w-full" style={{paddingBottom:'52%', background:'linear-gradient(135deg,#e0f2fe 0%,#f0fdf4 50%,#fef9c3 100%)'}}>
+              <div className="absolute inset-0 p-4 sm:p-8">
+                {/* 도로 */}
+                <div className="absolute bottom-0 left-0 right-0 h-10 bg-gray-300 opacity-50 rounded"></div>
+                {/* 건물 버튼들 */}
+                <button onClick={() => setSelectedBuilding(BUILDINGS[0])}
+                  className="absolute top-[12%] left-[5%] w-[18%] h-[22%] rounded-xl border-2 border-purple-400 bg-purple-100 hover:bg-purple-200 transition flex flex-col items-center justify-center gap-1 shadow group">
+                  <i className="fas fa-building text-purple-600 text-lg group-hover:scale-110 transition-transform"></i>
+                  <span className="text-xs font-bold text-purple-700">관리동</span>
+                  <span className="text-[10px] text-purple-500">{getItemsForBuilding(items,'admin').length}개</span>
+                </button>
+                <button onClick={() => setSelectedBuilding(BUILDINGS[1])}
+                  className="absolute top-[12%] left-[25%] w-[16%] h-[20%] rounded-xl border-2 border-cyan-400 bg-cyan-100 hover:bg-cyan-200 transition flex flex-col items-center justify-center gap-1 shadow group">
+                  <i className="fas fa-utensils text-cyan-600 text-lg group-hover:scale-110 transition-transform"></i>
+                  <span className="text-xs font-bold text-cyan-700">복지동</span>
+                  <span className="text-[10px] text-cyan-500">{getItemsForBuilding(items,'welfare').length}개</span>
+                </button>
+                <button onClick={() => setSelectedBuilding(BUILDINGS[2])}
+                  className="absolute top-[8%] left-[43%] w-[38%] h-[50%] rounded-xl border-2 border-amber-400 bg-amber-100 hover:bg-amber-200 transition flex flex-col items-center justify-center gap-1 shadow group">
+                  <i className="fas fa-industry text-amber-600 text-2xl group-hover:scale-110 transition-transform"></i>
+                  <span className="text-sm font-bold text-amber-700">메인공장</span>
+                  <span className="text-[10px] text-amber-500">{getItemsForBuilding(items,'main').length}개</span>
+                </button>
+                <button onClick={() => setSelectedBuilding(BUILDINGS[3])}
+                  className="absolute top-[62%] left-[20%] w-[35%] h-[28%] rounded-xl border-2 border-emerald-400 bg-emerald-100 hover:bg-emerald-200 transition flex flex-col items-center justify-center gap-1 shadow group">
+                  <i className="fas fa-warehouse text-emerald-600 text-xl group-hover:scale-110 transition-transform"></i>
+                  <span className="text-xs font-bold text-emerald-700">창고동</span>
+                  <span className="text-[10px] text-emerald-500">{getItemsForBuilding(items,'warehouse').length}개</span>
+                </button>
+                <button onClick={() => setSelectedBuilding(BUILDINGS[4])}
+                  className="absolute top-[35%] left-[25%] w-[16%] h-[25%] rounded-xl border-2 border-orange-400 bg-orange-100 hover:bg-orange-200 transition flex flex-col items-center justify-center gap-1 shadow group">
+                  <i className="fas fa-bolt text-orange-600 text-lg group-hover:scale-110 transition-transform"></i>
+                  <span className="text-xs font-bold text-orange-700">유틸리티</span>
+                  <span className="text-[10px] text-orange-500">{getItemsForBuilding(items,'utility').length}개</span>
+                </button>
+                <button onClick={() => setSelectedBuilding(BUILDINGS[5])}
+                  className="absolute bottom-[12%] left-[3%] w-[12%] h-[20%] rounded-xl border-2 border-slate-400 bg-slate-100 hover:bg-slate-200 transition flex flex-col items-center justify-center gap-1 shadow group">
+                  <i className="fas fa-shield-halved text-slate-600 text-lg group-hover:scale-110 transition-transform"></i>
+                  <span className="text-xs font-bold text-slate-700">경비실</span>
+                  <span className="text-[10px] text-slate-500">{getItemsForBuilding(items,'guard').length}개</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* 건물 카드 리스트 */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {BUILDINGS.map(b => {
+              const cnt  = getItemsForBuilding(items, b.id).length;
+              const replCnt = getItemsForBuilding(items, b.id).filter(i=>calcDisplayStatus(i)==='replace').length;
+              return (
+                <button key={b.id} onClick={() => setSelectedBuilding(b)}
+                  className="bg-white rounded-xl border border-gray-200 hover:border-blue-300 hover:shadow-md p-4 text-left transition group">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="w-3 h-3 rounded-full shrink-0" style={{background: b.color}}></span>
+                    <span className="font-semibold text-gray-800 text-sm group-hover:text-blue-600 transition">{b.name}</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-2 line-clamp-1">{b.desc}</p>
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">소화기 {cnt}개</span>
+                    {replCnt > 0 && <span className="bg-red-100 text-red-600 px-2 py-0.5 rounded-full">교체 {replCnt}개</span>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    // ── 2-Depth: 건물 상세 도면 ──
+    const hasPlan = !!FLOOR_PLANS[selectedBuilding.id];
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+        {/* 상단 헤더 */}
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <div className="flex items-center gap-3">
+            <button onClick={() => { setSelectedBuilding(null); setPlacingItem(false); setPendingForm(null); }}
+              className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-blue-600 transition">
+              <i className="fas fa-arrow-left"></i>전체 도면
+            </button>
+            <span className="text-gray-300">›</span>
+            <span className="font-bold text-gray-800 text-sm flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full inline-block" style={{background: selectedBuilding.color}}></span>
+              {selectedBuilding.name} 비상대피도
+            </span>
+          </div>
+          <button onClick={handleAddClick}
+            className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2 shadow-sm">
+            <i className="fas fa-plus"></i>소화기 추가
+          </button>
+        </div>
+
+        {/* 배치 모드 안내 배너 */}
+        {placingItem && (
+          <div className="mb-3 px-4 py-3 bg-blue-50 border border-blue-300 rounded-xl text-blue-700 text-sm font-medium flex items-center gap-2 animate-in">
+            <i className="fas fa-crosshairs"></i>
+            도면에서 소화기를 배치할 위치를 클릭하세요
+            <button onClick={() => { setPlacingItem(false); setPendingForm(null); }}
+              className="ml-auto text-blue-400 hover:text-blue-700 text-xs">취소</button>
+          </div>
+        )}
+
+        {/* 도면 영역 */}
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mb-5">
+          <div className={"relative w-full select-none " + (placingItem ? 'cursor-crosshair' : '')}
+            style={{minHeight: 400}}>
+            {hasPlan ? (
+              /* 실제 도면 이미지 */
+              <div className="relative" onClick={placingItem ? handleMapClick : undefined}>
+                <img ref={imgRef} src={FLOOR_PLANS[selectedBuilding.id]}
+                  alt={selectedBuilding.name + ' 도면'}
+                  className="w-full block"
+                  style={{userSelect:'none', pointerEvents: placingItem ? 'none' : 'auto'}}
+                  draggable={false} />
+                {/* 배치 클릭 투명 레이어 */}
+                {placingItem && (
+                  <div className="absolute inset-0 z-10"
+                    style={{cursor:'crosshair'}}
+                    onClick={handleMapClick}></div>
+                )}
+                {/* 소화기 아이콘들 */}
+                {placedItems.map(item => (
+                  <button key={item.id}
+                    onClick={e => { e.stopPropagation(); onInspect(item); }}
+                    onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onEdit(item); }}
+                    style={{
+                      position:'absolute',
+                      left: item.mapX + '%',
+                      top:  item.mapY + '%',
+                      transform: 'translate(-50%,-50%)',
+                      zIndex: 5,
+                    }}
+                    title={item.location + ' | 좌클릭: 점검 / 우클릭: 수정'}
+                    className="group">
+                    <div className="relative flex flex-col items-center">
+                      <div className="w-7 h-7 rounded-full flex items-center justify-center shadow-lg border-2 border-white transition-transform group-hover:scale-125"
+                        style={{background: iconColor(item)}}>
+                        <i className="fas fa-fire-extinguisher text-white text-xs"></i>
+                      </div>
+                      <span className="mt-0.5 text-[9px] font-bold bg-white border border-gray-300 rounded px-1 shadow-sm text-gray-700 whitespace-nowrap">
+                        {String(item.id).padStart(3,'0')}
+                      </span>
+                      {/* 툴팁 */}
+                      <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs rounded-lg px-2 py-1.5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20 shadow-xl">
+                        <div className="font-semibold">{item.location || '-'}</div>
+                        <div className="text-gray-300 text-[10px]">{item.type || '-'} · {item.mfgYm || '-'}</div>
+                        <div className="text-[10px] mt-0.5">
+                          <span className="text-blue-300">좌클릭</span>: 점검 &nbsp;
+                          <span className="text-amber-300">우클릭</span>: 수정
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              /* 임시 도면 자리 표시자 */
+              <div className="flex flex-col items-center justify-center py-20 gap-3 text-gray-400 relative"
+                ref={imgRef}
+                onClick={placingItem ? handleMapClick : undefined}
+                style={{cursor: placingItem ? 'crosshair' : 'default', minHeight: 400, background:'#f8fafc'}}>
+                {/* 임시 격자 배경 */}
+                <svg className="absolute inset-0 w-full h-full opacity-10" xmlns="http://www.w3.org/2000/svg">
+                  <defs>
+                    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#94a3b8" strokeWidth="1"/>
+                    </pattern>
+                  </defs>
+                  <rect width="100%" height="100%" fill="url(#grid)" />
+                </svg>
+                {/* 임시 건물 구획 표시 */}
+                <div className="relative z-10 w-full px-8">
+                  <div className="border-2 border-dashed rounded-2xl p-6 text-center"
+                    style={{borderColor: selectedBuilding.color + '80', background: selectedBuilding.color + '10'}}>
+                    <i className="fas fa-map-pin text-4xl mb-3 opacity-40" style={{color: selectedBuilding.color}}></i>
+                    <p className="font-semibold text-gray-600 mb-1">{selectedBuilding.name} 도면</p>
+                    <p className="text-sm text-gray-400 mb-4">
+                      {placingItem
+                        ? '이 영역을 클릭하면 소화기가 배치됩니다.'
+                        : '실제 비상대피도 이미지를 /static/ 폴더에 업로드하면 표시됩니다.'}
+                    </p>
+                    {!placingItem && buildingItems.length > 0 && (
+                      <p className="text-xs text-gray-400">이 건물에 등록된 소화기: {buildingItems.length}개</p>
+                    )}
+                  </div>
+                </div>
+                {/* 좌표 없는 소화기 아이콘들 */}
+                {placedItems.map(item => (
+                  <button key={item.id}
+                    onClick={e => { e.stopPropagation(); onInspect(item); }}
+                    onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onEdit(item); }}
+                    style={{
+                      position:'absolute',
+                      left: item.mapX + '%',
+                      top:  item.mapY + '%',
+                      transform: 'translate(-50%,-50%)',
+                      zIndex: 5,
+                    }}
+                    className="group"
+                    title={item.location}>
+                    <div className="relative flex flex-col items-center">
+                      <div className="w-7 h-7 rounded-full flex items-center justify-center shadow-lg border-2 border-white"
+                        style={{background: iconColor(item)}}>
+                        <i className="fas fa-fire-extinguisher text-white text-xs"></i>
+                      </div>
+                      <span className="mt-0.5 text-[9px] font-bold bg-white border border-gray-300 rounded px-1 shadow-sm text-gray-700">
+                        {String(item.id).padStart(3,'0')}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 도면 하단 범례 */}
+          <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex flex-wrap gap-4 text-xs text-gray-500">
+            <span className="flex items-center gap-1.5">
+              <span className="w-4 h-4 rounded-full bg-green-600 flex items-center justify-center"><i className="fas fa-fire-extinguisher text-white" style={{fontSize:7}}></i></span>양호
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-4 h-4 rounded-full bg-amber-500 flex items-center justify-center"><i className="fas fa-fire-extinguisher text-white" style={{fontSize:7}}></i></span>점검 필요
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-4 h-4 rounded-full bg-purple-700 flex items-center justify-center"><i className="fas fa-fire-extinguisher text-white" style={{fontSize:7}}></i></span>불량
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-4 h-4 rounded-full bg-red-600 flex items-center justify-center"><i className="fas fa-fire-extinguisher text-white" style={{fontSize:7}}></i></span>교체 대상
+            </span>
+            <span className="ml-auto text-gray-400">좌클릭: 점검 · 우클릭: 수정</span>
+          </div>
+        </div>
+
+        {/* 이 건물의 소화기 목록 (간략) */}
+        {buildingItems.length > 0 && (
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+              <span className="text-sm font-semibold text-gray-700">
+                <i className="fas fa-list-ul mr-1.5 text-blue-500"></i>{selectedBuilding.name} 소화기 목록
+              </span>
+              <span className="text-xs text-gray-400">{buildingItems.length}개</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-500 border-b border-gray-200">
+                    <th className="px-3 py-2 text-center whitespace-nowrap">고유번호</th>
+                    <th className="px-3 py-2 text-left whitespace-nowrap">설치 위치</th>
+                    <th className="px-3 py-2 text-center whitespace-nowrap">종류</th>
+                    <th className="px-3 py-2 text-center whitespace-nowrap">상태</th>
+                    <th className="px-3 py-2 text-center whitespace-nowrap">도면 배치</th>
+                    <th className="px-3 py-2 text-center whitespace-nowrap">관리</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {buildingItems.map((item, idx) => {
+                    const isPlaced = item.mapX != null && item.mapY != null;
+                    return (
+                      <tr key={item.id} className={'border-t border-gray-100 ' + (idx%2===0?'bg-white':'bg-gray-50/50')}>
+                        <td className="px-3 py-2 text-center font-mono text-gray-400">BK-FE-{String(item.id).padStart(3,'0')}</td>
+                        <td className="px-3 py-2 text-gray-800 font-medium max-w-[180px] truncate">{item.location||'-'}</td>
+                        <td className="px-3 py-2 text-center text-gray-600">{item.type||'-'}</td>
+                        <td className="px-3 py-2 text-center"><StatusBadge item={item} /></td>
+                        <td className="px-3 py-2 text-center">
+                          {isPlaced
+                            ? <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full text-[10px] font-semibold">배치됨</span>
+                            : <span className="bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full text-[10px]">미배치</span>}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => onInspect(item)}
+                              className="bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded text-[10px] font-semibold whitespace-nowrap transition">점검</button>
+                            <button onClick={() => onEdit(item)}
+                              className="bg-gray-100 hover:bg-amber-100 text-gray-600 hover:text-amber-600 px-2 py-1 rounded text-[10px] transition">수정</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* 소화기 추가 모달 */}
+        {addModal && (
+          <EditModal item={{}} onSave={handleFormSave} onClose={() => setAddModal(false)} />
+        )}
+      </div>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
   //  요약 카드
   // ═══════════════════════════════════════════════════════════════
   function SummaryCards({ items, activeFilter, onFilterChange }) {
@@ -2180,6 +2593,7 @@ app.get('/master', (c) => {
     const [delItem,     setDelItem]     = useState(null);
     const [inspectItem, setInspectItem] = useState(null);
     const [activeTab,   setActiveTab]   = useState('extinguisher'); // extinguisher | bagfilter | hazard
+    const [subView,     setSubView]     = useState('map');           // map | list  (소화기 탭 내부)
     const [toast,       setToast]       = useState(null);
 
     const TABS = [
@@ -2294,8 +2708,8 @@ app.get('/master', (c) => {
                 <span className="hidden sm:block text-gray-500 text-xs font-medium">단양1공장 설비관리시스템</span>
               </div>
             </div>
-            {/* 우: 액션 버튼 (소화기 탭일 때만) */}
-            {activeTab === 'extinguisher' && (
+            {/* 우: 액션 버튼 (소화기+목록표 탭일 때만) */}
+            {activeTab === 'extinguisher' && subView === 'list' && (
               <div className="flex items-center gap-2">
                 <button onClick={handleReset}
                   className="text-xs text-gray-500 hover:text-gray-700 border border-gray-300 hover:border-gray-400 bg-white px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
@@ -2336,114 +2750,146 @@ app.get('/master', (c) => {
             <p className="text-sm opacity-60">{TABS.find(t=>t.key===activeTab)?.label} 기능은 현재 개발 중입니다.</p>
           </div>
         ) : (
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-
-          {/* 요약 카드 */}
-          <SummaryCards items={items} activeFilter={filter} onFilterChange={setFilter} />
-
-          {/* 검색 바 */}
-          <div className="flex mb-4">
-            <div className="relative flex-1 max-w-md">
-              <i className="fas fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none"></i>
-              <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-                placeholder="위치, 종류, 담당자 검색..." className="w-full pl-10 pr-4 py-2 text-sm" />
+        <div>
+          {/* ── 소화기 서브탭 ── */}
+          <div className="bg-white border-b border-gray-200">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center gap-1">
+              {[
+                { key:'map',  label:'공장 도면', icon:'fa-map' },
+                { key:'list', label:'소화기 목록표', icon:'fa-list-ul' },
+              ].map(sv => (
+                <button key={sv.key} onClick={() => setSubView(sv.key)}
+                  className={
+                    "px-5 py-2.5 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap "
+                    + (subView === sv.key
+                      ? "border-blue-500 text-blue-600 bg-blue-50/40"
+                      : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")
+                  }>
+                  <i className={"fas " + sv.icon + " text-xs"}></i>
+                  {sv.label}
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* 결과 수 */}
-          <div className="text-xs text-gray-400 mb-2 ml-1">
-            {filtered.length}개 항목
-            {(search || filter !== 'all') && <span className="ml-1">(전체 {items.length}개 중 필터)</span>}
-          </div>
+          {/* ── 서브뷰: 공장 도면 ── */}
+          {subView === 'map' ? (
+            <FloorPlanView
+              items={items}
+              setItems={setItems}
+              onEdit={handleEdit}
+              onInspect={(item) => setInspectItem(item)}
+              showToast={showToast}
+            />
+          ) : (
+          /* ── 서브뷰: 소화기 목록표 ── */
+          <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+            {/* 요약 카드 */}
+            <SummaryCards items={items} activeFilter={filter} onFilterChange={setFilter} />
 
-          {/* 테이블 */}
-          <div className="rounded-xl border border-gray-200 overflow-hidden shadow-sm bg-white">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="bg-gray-100 text-gray-500 text-xs uppercase tracking-wide border-b border-gray-200">
-                    <th className="px-4 py-3 text-center w-10 whitespace-nowrap">No.</th>
-                    <th className="px-4 py-3 text-center whitespace-nowrap">고유 번호</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">설치 위치</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">소화기 종류</th>
-                    <th className="px-4 py-3 text-center whitespace-nowrap">제조년월</th>
-                    <th className="px-4 py-3 text-center whitespace-nowrap">교체 년월</th>
-                    <th className="px-4 py-3 text-center whitespace-nowrap">최근 점검일</th>
-                    <th className="px-4 py-3 text-center whitespace-nowrap">상태</th>
-                    <th className="px-4 py-3 text-center whitespace-nowrap">담당자</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">비고</th>
-                    <th className="px-4 py-3 text-center w-24 whitespace-nowrap">관리</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.length === 0 ? (
-                    <tr>
-                      <td colSpan={11} className="text-center py-16 text-gray-400">
-                        <i className="fas fa-inbox text-3xl mb-3 block opacity-40"></i>
-                        검색 결과가 없습니다.
-                      </td>
+            {/* 검색 바 */}
+            <div className="flex mb-4">
+              <div className="relative flex-1 max-w-md">
+                <i className="fas fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none"></i>
+                <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+                  placeholder="위치, 종류, 담당자 검색..." className="w-full pl-10 pr-4 py-2 text-sm" />
+              </div>
+            </div>
+
+            {/* 결과 수 */}
+            <div className="text-xs text-gray-400 mb-2 ml-1">
+              {filtered.length}개 항목
+              {(search || filter !== 'all') && <span className="ml-1">(전체 {items.length}개 중 필터)</span>}
+            </div>
+
+            {/* 테이블 */}
+            <div className="rounded-xl border border-gray-200 overflow-hidden shadow-sm bg-white">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-gray-100 text-gray-500 text-xs uppercase tracking-wide border-b border-gray-200">
+                      <th className="px-4 py-3 text-center w-10 whitespace-nowrap">No.</th>
+                      <th className="px-4 py-3 text-center whitespace-nowrap">고유 번호</th>
+                      <th className="px-4 py-3 text-left whitespace-nowrap">설치 위치</th>
+                      <th className="px-4 py-3 text-left whitespace-nowrap">소화기 종류</th>
+                      <th className="px-4 py-3 text-center whitespace-nowrap">제조년월</th>
+                      <th className="px-4 py-3 text-center whitespace-nowrap">교체 년월</th>
+                      <th className="px-4 py-3 text-center whitespace-nowrap">최근 점검일</th>
+                      <th className="px-4 py-3 text-center whitespace-nowrap">상태</th>
+                      <th className="px-4 py-3 text-center whitespace-nowrap">담당자</th>
+                      <th className="px-4 py-3 text-left whitespace-nowrap">비고</th>
+                      <th className="px-4 py-3 text-center w-24 whitespace-nowrap">관리</th>
                     </tr>
-                  ) : filtered.map((item, idx) => {
-                    const st      = calcDisplayStatus(item);
-                    const mo      = monthsElapsed(item.mfgYm);
-                    const isRepl  = st === 'replace';
-                    const rowCls  = "table-row border-t border-gray-100 transition-colors " + (isRepl ? "bg-red-50" : idx % 2 === 0 ? "bg-white" : "bg-gray-50/50");
-                    const cellCls = isRepl ? "text-red-600" : "text-gray-700";
-                    return (
-                      <tr key={item.id} className={rowCls}>
-                        <td className={"px-4 py-3 text-center text-gray-400 text-xs " + (isRepl ? "text-red-500" : "")}>{item.id}</td>
-                        <td className={"px-4 py-3 text-center font-mono text-xs " + (isRepl ? "text-red-500" : "text-gray-400")}>
-                          {'BK-FE-' + String(item.id).padStart(3, '0')}
-                        </td>
-                        <td className={"px-4 py-3 font-medium " + (isRepl ? "text-red-600 font-semibold" : "text-gray-900")}>
-                          {item.location || '-'}
-                        </td>
-                        <td className={"px-4 py-3 " + cellCls}>{item.type || '-'}</td>
-                        <td className={"px-4 py-3 text-center " + cellCls}>{item.mfgYm || '-'}</td>
-                        <td className={"px-4 py-3 text-center font-mono text-xs " + (mo >= REPLACE_MONTHS ? "text-red-600 font-bold" : mo >= 90 ? "text-amber-600" : "text-gray-500")}>
-                          {calcReplaceYm(item.mfgYm)}
-                        </td>
-                        <td className={"px-4 py-3 text-center " + (daysElapsed(item.lastInspectionDate) >= INSPECT_DAYS ? "text-amber-600" : "text-gray-600")}>
-                          {item.lastInspectionDate || '-'}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <StatusBadge item={item} />
-                        </td>
-                        <td className={"px-4 py-3 text-center " + cellCls}>{item.manager || <span className="text-gray-400">-</span>}</td>
-                        <td className={"px-4 py-3 max-w-[140px] truncate text-xs " + (item.note ? "text-amber-700" : "text-gray-400")}>
-                          {item.note || '-'}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            <button onClick={() => setInspectItem(item)}
-                              className="text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded transition whitespace-nowrap" title="점검하기">
-                              <i className="fas fa-clipboard-check mr-1"></i>점검
-                            </button>
-                            <button onClick={() => handleEdit(item)}
-                              className="text-gray-400 hover:text-amber-500 transition p-1.5 rounded hover:bg-amber-50" title="수정">
-                              <i className="fas fa-pen text-xs"></i>
-                            </button>
-                            <button onClick={() => handleDelete(item)}
-                              className="text-gray-400 hover:text-red-500 transition p-1.5 rounded hover:bg-red-50" title="삭제">
-                              <i className="fas fa-trash text-xs"></i>
-                            </button>
-                          </div>
+                  </thead>
+                  <tbody>
+                    {filtered.length === 0 ? (
+                      <tr>
+                        <td colSpan={11} className="text-center py-16 text-gray-400">
+                          <i className="fas fa-inbox text-3xl mb-3 block opacity-40"></i>
+                          검색 결과가 없습니다.
                         </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    ) : filtered.map((item, idx) => {
+                      const st      = calcDisplayStatus(item);
+                      const mo      = monthsElapsed(item.mfgYm);
+                      const isRepl  = st === 'replace';
+                      const rowCls  = "table-row border-t border-gray-100 transition-colors " + (isRepl ? "bg-red-50" : idx % 2 === 0 ? "bg-white" : "bg-gray-50/50");
+                      const cellCls = isRepl ? "text-red-600" : "text-gray-700";
+                      return (
+                        <tr key={item.id} className={rowCls}>
+                          <td className={"px-4 py-3 text-center text-gray-400 text-xs " + (isRepl ? "text-red-500" : "")}>{item.id}</td>
+                          <td className={"px-4 py-3 text-center font-mono text-xs " + (isRepl ? "text-red-500" : "text-gray-400")}>
+                            {'BK-FE-' + String(item.id).padStart(3, '0')}
+                          </td>
+                          <td className={"px-4 py-3 font-medium " + (isRepl ? "text-red-600 font-semibold" : "text-gray-900")}>
+                            {item.location || '-'}
+                          </td>
+                          <td className={"px-4 py-3 " + cellCls}>{item.type || '-'}</td>
+                          <td className={"px-4 py-3 text-center " + cellCls}>{item.mfgYm || '-'}</td>
+                          <td className={"px-4 py-3 text-center font-mono text-xs " + (mo >= REPLACE_MONTHS ? "text-red-600 font-bold" : mo >= 90 ? "text-amber-600" : "text-gray-500")}>
+                            {calcReplaceYm(item.mfgYm)}
+                          </td>
+                          <td className={"px-4 py-3 text-center " + (daysElapsed(item.lastInspectionDate) >= INSPECT_DAYS ? "text-amber-600" : "text-gray-600")}>
+                            {item.lastInspectionDate || '-'}
+                          </td>
+                          <td className="px-4 py-3 text-center"><StatusBadge item={item} /></td>
+                          <td className={"px-4 py-3 text-center " + cellCls}>{item.manager || <span className="text-gray-400">-</span>}</td>
+                          <td className={"px-4 py-3 max-w-[140px] truncate text-xs " + (item.note ? "text-amber-700" : "text-gray-400")}>
+                            {item.note || '-'}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <button onClick={() => setInspectItem(item)}
+                                className="text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded transition whitespace-nowrap">
+                                <i className="fas fa-clipboard-check mr-1"></i>점검
+                              </button>
+                              <button onClick={() => handleEdit(item)}
+                                className="text-gray-400 hover:text-amber-500 transition p-1.5 rounded hover:bg-amber-50">
+                                <i className="fas fa-pen text-xs"></i>
+                              </button>
+                              <button onClick={() => handleDelete(item)}
+                                className="text-gray-400 hover:text-red-500 transition p-1.5 rounded hover:bg-red-50">
+                                <i className="fas fa-trash text-xs"></i>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
 
-          {/* 범례 */}
-          <div className="mt-4 flex flex-wrap gap-4 text-xs text-gray-500">
-            <span><i className="fas fa-circle-check text-emerald-400 mr-1"></i>양호: 점검일 30일 미경과 &amp; 제조 120개월 미만</span>
-            <span><i className="fas fa-clock text-amber-400 mr-1"></i>점검 필요: 최근 점검일로부터 30일 이상 경과</span>
-            <span><i className="fas fa-triangle-exclamation text-red-400 mr-1"></i>교체 대상: 제조 후 120개월(10년) 이상 경과 → 빨간색 강조</span>
-          </div>
-        </main>
+            {/* 범례 */}
+            <div className="mt-4 flex flex-wrap gap-4 text-xs text-gray-500">
+              <span><i className="fas fa-circle-check text-emerald-400 mr-1"></i>양호: 점검일 30일 미경과 &amp; 제조 120개월 미만</span>
+              <span><i className="fas fa-clock text-amber-400 mr-1"></i>점검 필요: 최근 점검일로부터 30일 이상 경과</span>
+              <span><i className="fas fa-triangle-exclamation text-red-400 mr-1"></i>교체 대상: 제조 후 120개월(10년) 이상 경과</span>
+            </div>
+          </main>
+          )}
+        </div>
         )} {/* end activeTab === 'extinguisher' */}
 
         {/* 모달 */}
