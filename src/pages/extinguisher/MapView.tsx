@@ -12,7 +12,6 @@ import {
   removeExtinguisherPosition,
   getExtinguisherById,
   addNewExtinguisher,
-  clearAllExtinguishers,
 } from '../../services/floorPlanService';
 
 /* ─────────────────────────────────────────
@@ -1614,11 +1613,6 @@ export default function MapView() {
   const [view,             setView]             = useState<'aerial' | 'floor-modal' | 'floor-view'>('aerial');
   const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null);
   const [selectedFloor,    setSelectedFloor]    = useState<FloorDef | null>(null);
-
-  /* ── 앱 최초 마운트 시 소화기 데이터 전체 초기화 ── */
-  useEffect(() => {
-    clearAllExtinguishers();
-  }, []);
 
   const handleBuildingSelect = (name: string) => {
     setSelectedBuilding(name);
