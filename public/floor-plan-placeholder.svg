@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800">
+  <rect width="1200" height="800" fill="#f0ede8"/>
+  <!-- 외벽 -->
+  <rect x="60" y="60" width="1080" height="680" fill="none" stroke="#555" stroke-width="6"/>
+  <!-- 복도 (수평 중앙) -->
+  <rect x="60" y="340" width="1080" height="120" fill="#e8e4dc" stroke="#aaa" stroke-width="1.5"/>
+  <text x="600" y="408" text-anchor="middle" font-size="18" fill="#888" font-family="sans-serif">복도</text>
+
+  <!-- 1층 방들 (위쪽) -->
+  <!-- 현관 -->
+  <rect x="60" y="60" width="200" height="280" fill="#fff" stroke="#777" stroke-width="2"/>
+  <text x="160" y="195" text-anchor="middle" font-size="15" fill="#555" font-family="sans-serif">현관</text>
+  <!-- 대표실 -->
+  <rect x="260" y="60" width="220" height="280" fill="#fff" stroke="#777" stroke-width="2"/>
+  <text x="370" y="195" text-anchor="middle" font-size="15" fill="#555" font-family="sans-serif">대표실</text>
+  <!-- 회의실 -->
+  <rect x="480" y="60" width="200" height="280" fill="#fff" stroke="#777" stroke-width="2"/>
+  <text x="580" y="195" text-anchor="middle" font-size="15" fill="#555" font-family="sans-serif">회의실</text>
+  <!-- 경영지원 -->
+  <rect x="680" y="60" width="220" height="280" fill="#fff" stroke="#777" stroke-width="2"/>
+  <text x="790" y="195" text-anchor="middle" font-size="15" fill="#555" font-family="sans-serif">경영지원</text>
+  <!-- 안전환경파트 -->
+  <rect x="900" y="60" width="240" height="280" fill="#fff" stroke="#777" stroke-width="2"/>
+  <text x="1020" y="188" text-anchor="middle" font-size="14" fill="#555" font-family="sans-serif">안전환경</text>
+  <text x="1020" y="210" text-anchor="middle" font-size="14" fill="#555" font-family="sans-serif">파트</text>
+
+  <!-- 1층 방들 (아래쪽) -->
+  <!-- 물류파트 -->
+  <rect x="60" y="460" width="220" height="280" fill="#fff" stroke="#777" stroke-width="2"/>
+  <text x="170" y="608" text-anchor="middle" font-size="15" fill="#555" font-family="sans-serif">물류파트</text>
+  <!-- 구매파트 -->
+  <rect x="280" y="460" width="200" height="280" fill="#fff" stroke="#777" stroke-width="2"/>
+  <text x="380" y="608" text-anchor="middle" font-size="15" fill="#555" font-family="sans-serif">구매파트</text>
+  <!-- 흡연구역 -->
+  <rect x="480" y="460" width="160" height="280" fill="#fffbf0" stroke="#cca" stroke-width="2"/>
+  <text x="560" y="608" text-anchor="middle" font-size="13" fill="#887733" font-family="sans-serif">흡연구역</text>
+  <!-- 기사 휴게실 -->
+  <rect x="640" y="460" width="220" height="280" fill="#fff" stroke="#777" stroke-width="2"/>
+  <text x="750" y="601" text-anchor="middle" font-size="13" fill="#555" font-family="sans-serif">기사</text>
+  <text x="750" y="620" text-anchor="middle" font-size="13" fill="#555" font-family="sans-serif">휴게실</text>
+  <!-- 품질관리 실험실 -->
+  <rect x="860" y="460" width="280" height="280" fill="#fff" stroke="#777" stroke-width="2"/>
+  <text x="1000" y="601" text-anchor="middle" font-size="13" fill="#555" font-family="sans-serif">품질관리</text>
+  <text x="1000" y="620" text-anchor="middle" font-size="13" fill="#555" font-family="sans-serif">실험실</text>
+
+  <!-- 격자 보조선 -->
+  <line x1="60" y1="200" x2="1140" y2="200" stroke="#ccc" stroke-width="0.5" stroke-dasharray="6,6"/>
+  <line x1="60" y1="600" x2="1140" y2="600" stroke="#ccc" stroke-width="0.5" stroke-dasharray="6,6"/>
+  <line x1="400" y1="60" x2="400" y2="740" stroke="#ccc" stroke-width="0.5" stroke-dasharray="6,6"/>
+  <line x1="800" y1="60" x2="800" y2="740" stroke="#ccc" stroke-width="0.5" stroke-dasharray="6,6"/>
+
+  <!-- 제목 -->
+  <rect x="0" y="0" width="1200" height="40" fill="#3b5fc0" opacity="0.85"/>
+  <text x="600" y="27" text-anchor="middle" font-size="20" fill="white" font-family="sans-serif" font-weight="bold">관리동 1층 평면도</text>
+  <!-- 방위 -->
+  <text x="1150" y="90" text-anchor="middle" font-size="26" fill="#444" font-family="sans-serif">↑</text>
+  <text x="1150" y="108" text-anchor="middle" font-size="12" fill="#444" font-family="sans-serif">N</text>
+</svg>

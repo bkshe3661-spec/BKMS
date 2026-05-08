@@ -54,8 +54,8 @@ const SUMMARY_CARDS: {
     ),
   },
   {
-    key: '불량',
-    label: '불량',
+    key: '점검필요' as FilterStatus,
+    label: '불량(준비중)',
     gradient: 'bg-purple-600',
     icon: (
       <svg className="w-7 h-7 text-purple-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -131,17 +131,15 @@ export default function ListView() {
     전체:    data.length,
     양호:    data.filter(d => d.computedStatus === '양호').length,
     점검필요: data.filter(d => d.computedStatus === '점검필요').length,
-    불량:    0, // 현재 로직에 '불량' 없음 → 추후 백엔드 연동 시 추가
     교체대상: data.filter(d => d.computedStatus === '교체대상').length,
   }), [data]);
 
   /* 필터 + 검색 */
   const filtered = useMemo(() => {
     let result =
-      filterStatus === '전체' || filterStatus === '불량'
-        ? data.filter(d => filterStatus === '불량' ? false : true)
+      filterStatus === '전체'
+        ? data
         : data.filter(d => d.computedStatus === filterStatus);
-    if (filterStatus === '불량') result = [];
     if (searchText.trim()) {
       const q = searchText.trim().toLowerCase();
       result = result.filter(d =>

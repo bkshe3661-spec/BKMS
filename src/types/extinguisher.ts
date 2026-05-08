@@ -9,4 +9,8 @@ export interface Extinguisher {
   status: ExtinguisherStatus;
   manager: string;      // 담당자
   note: string;         // 비고
+  // 도면 위치 정보 (선택적 - 편집 모드에서 설정)
+  mapX?: number;        // 이미지 내 X 비율 (0~1)
+  mapY?: number;        // 이미지 내 Y 비율 (0~1)
+  floor?: string;       // 배치된 도면 식별자 (예: "관리동_1층")
 }
