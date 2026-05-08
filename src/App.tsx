@@ -8,7 +8,7 @@ import type { GnbTab, ExtinguisherLnbTab } from './types/navigation';
 
 export default function App() {
   const [activeGnb, setActiveGnb] = useState<GnbTab>('extinguisher');
-  const [activeLnb, setActiveLnb] = useState<ExtinguisherLnbTab>('map');
+  const [activeLnb, setActiveLnb] = useState<ExtinguisherLnbTab>('list');
 
   // 앱 최초 실행 시 localStorage 초기 데이터 세팅
   useEffect(() => {
