@@ -90,3 +90,21 @@ export function addNewExtinguisher(fe: Extinguisher): void {
     saveAll([...list, fe]);
   }
 }
+
+/**
+ * 소화기 데이터 전체 초기화
+ * 기존에 사용하던 모든 키를 삭제하고 빈 배열로 초기화
+ */
+export function clearAllExtinguishers(): void {
+  // 현재 키 + 과거에 사용했을 수 있는 키 모두 삭제
+  const keysToRemove = [
+    'bkms_extinguishers',
+    'bkms_fire_extinguishers',
+    'extinguishers',
+    'fire_extinguishers',
+    'bkms_fe',
+  ];
+  keysToRemove.forEach(k => localStorage.removeItem(k));
+  // 현재 사용 키를 빈 배열로 명시적 초기화
+  saveAll([]);
+}
