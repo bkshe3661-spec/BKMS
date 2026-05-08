@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { BuildingPolygon, Point } from '../../types/polygon';
-import type { Extinguisher } from '../../types/extinguisher';
+import type { Extinguisher, ExtinguisherStatus } from '../../types/extinguisher';
 import {
   loadPolygons, addPolygon, removePolygon,
 } from '../../services/polygonService';
@@ -11,6 +11,7 @@ import {
   updateExtinguisherInfo,
   removeExtinguisherPosition,
   getExtinguisherById,
+  addNewExtinguisher,
 } from '../../services/floorPlanService';
 
 /* ─────────────────────────────────────────
@@ -50,7 +51,7 @@ interface FloorDef {
   img: string;
   imgW: number;
   imgH: number;
-  keywords: string[];   // location 필드에 모두 포함돼야 하는 키워드
+  keywords: string[];
 }
 
 const BUILDING_FLOORS: Record<string, FloorDef[]> = {
@@ -69,7 +70,7 @@ const BUILDING_FLOORS: Record<string, FloorDef[]> = {
       img: '/floor-2f.png',
       imgW: 1024,
       imgH: 546,
-      keywords: ['관리동'],   // 2층 키워드는 location에 없을 수 있어 관리동만 필터
+      keywords: ['관리동'],
     },
   ],
 };
@@ -206,7 +207,7 @@ function FloorModal({
 }
 
 /* ─────────────────────────────────────────
-   소화기 편집 모달
+   소화기 편집 모달 (기존 마커 클릭 시)
 ───────────────────────────────────────── */
 function EditModal({
   item, onSave, onClose, onRemoveFromMap,
@@ -243,11 +244,11 @@ function EditModal({
         </div>
         <div className="px-5 py-4 space-y-3 max-h-96 overflow-y-auto">
           {[
-            { k: 'location' as const, label: '설치 위치' },
-            { k: 'type'     as const, label: '소화기 종류' },
-            { k: 'mfgDate'  as const, label: '제조년월', ph: 'YYYY-MM' },
+            { k: 'location'      as const, label: '설치 위치' },
+            { k: 'type'          as const, label: '소화기 종류' },
+            { k: 'mfgDate'       as const, label: '제조년월',   ph: 'YYYY-MM' },
             { k: 'lastCheckDate' as const, label: '최근 점검일', ph: 'YYYY-MM-DD' },
-            { k: 'manager'  as const, label: '담당자' },
+            { k: 'manager'       as const, label: '담당자' },
           ].map(({ k, label, ph }) => (
             <div key={k}>
               <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
@@ -275,7 +276,7 @@ function EditModal({
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1">비고</label>
             <textarea
-              value={form.note}
+              value={form.note ?? ''}
               onChange={e => set('note', e.target.value)}
               rows={2}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 resize-none"
@@ -313,6 +314,206 @@ function EditModal({
 }
 
 /* ─────────────────────────────────────────
+   신규 소화기 추가 모달 ([+ 소화기 추가] 버튼용)
+───────────────────────────────────────── */
+interface NewExtinguisherForm {
+  location: string;
+  type: string;
+  mfgDate: string;
+  lastCheckDate: string;
+  manager: string;
+  status: string;
+  note: string;
+}
+
+function AddModal({
+  floor,
+  pendingRatio,
+  onSave,
+  onClose,
+}: {
+  floor: FloorDef;
+  pendingRatio: { x: number; y: number };
+  onSave: (fe: Extinguisher) => void;
+  onClose: () => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [form, setForm] = useState<NewExtinguisherForm>({
+    location: '',
+    type: 'ABC 분말 3.3kg',
+    mfgDate: '',
+    lastCheckDate: today,
+    manager: '',
+    status: '정상',
+    note: '',
+  });
+  const set = (k: keyof NewExtinguisherForm, v: string) =>
+    setForm(f => ({ ...f, [k]: v }));
+
+  const handleSave = () => {
+    if (!form.location.trim()) {
+      alert('설치 위치를 입력하세요.');
+      return;
+    }
+    // ID 자동 생성: 타임스탬프 기반
+    const newId = `BK-FE-${Date.now().toString().slice(-6)}`;
+    const newFe: Extinguisher = {
+      id: newId,
+      location: form.location,
+      type: form.type,
+      mfgDate: form.mfgDate,
+      lastCheckDate: form.lastCheckDate,
+      manager: form.manager,
+      status: form.status as ExtinguisherStatus,
+      note: form.note,
+      mapX: pendingRatio.x,
+      mapY: pendingRatio.y,
+      floor: floor.id,
+    };
+    onSave(newFe);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.55)' }}
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-96 overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* 헤더 */}
+        <div className="flex items-center justify-between px-5 py-4 bg-blue-600">
+          <div>
+            <p className="text-xs text-blue-200">{floor.label} 도면 위치 지정 완료</p>
+            <h2 className="text-base font-bold text-white mt-0.5">소화기 정보 입력</h2>
+          </div>
+          <button onClick={onClose} className="text-blue-200 hover:text-white transition-colors">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        {/* 좌표 미리보기 */}
+        <div className="mx-5 mt-4 mb-1 px-3 py-2 bg-blue-50 rounded-lg border border-blue-200 flex items-center gap-2">
+          <svg className="w-4 h-4 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+          <span className="text-xs text-blue-700 font-mono">
+            X: {(pendingRatio.x * 100).toFixed(1)}% &nbsp;/&nbsp; Y: {(pendingRatio.y * 100).toFixed(1)}%
+          </span>
+        </div>
+
+        {/* 입력 폼 */}
+        <div className="px-5 py-3 space-y-3 max-h-80 overflow-y-auto">
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">
+              설치 위치 <span className="text-red-500">*</span>
+            </label>
+            <input
+              value={form.location}
+              onChange={e => set('location', e.target.value)}
+              placeholder="예: 관리동 1층 복도"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">소화기 종류</label>
+            <select
+              value={form.type}
+              onChange={e => set('type', e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 bg-white"
+            >
+              <option>ABC 분말 3.3kg</option>
+              <option>ABC 분말 4.5kg</option>
+              <option>하론 3kg</option>
+              <option>자동확산 3kg</option>
+              <option>K급 7.5L</option>
+              <option>CO2 5kg</option>
+              <option>기타</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">제조년월</label>
+              <input
+                value={form.mfgDate}
+                onChange={e => set('mfgDate', e.target.value)}
+                placeholder="YYYY-MM"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">최근 점검일</label>
+              <input
+                value={form.lastCheckDate}
+                onChange={e => set('lastCheckDate', e.target.value)}
+                placeholder="YYYY-MM-DD"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">담당자</label>
+            <input
+              value={form.manager}
+              onChange={e => set('manager', e.target.value)}
+              placeholder="담당자 이름"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">상태</label>
+            <select
+              value={form.status}
+              onChange={e => set('status', e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 bg-white"
+            >
+              <option>정상</option>
+              <option>점검필요</option>
+              <option>교체대상</option>
+              <option>폐기</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">비고</label>
+            <textarea
+              value={form.note}
+              onChange={e => set('note', e.target.value)}
+              rows={2}
+              placeholder="특이사항 입력"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 resize-none"
+            />
+          </div>
+        </div>
+
+        {/* 저장 버튼 */}
+        <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 flex gap-2">
+          <button
+            onClick={handleSave}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7"/>
+            </svg>
+            저장
+          </button>
+          <button
+            onClick={onClose}
+            className="px-4 py-2.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 border border-gray-200 rounded-xl text-sm transition-colors"
+          >취소</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────
    내부 도면 뷰 (FloorView) — 1층·2층 공통
 ───────────────────────────────────────── */
 function FloorView({
@@ -332,14 +533,23 @@ function FloorView({
   const [markers,  setMarkers]  = useState<Extinguisher[]>(() => getExtinguishersOnFloor(floor.id));
   const [unplaced, setUnplaced] = useState<Extinguisher[]>(() => getUnplacedExtinguishers(floor.id));
   const [editMode, setEditMode] = useState(false);
-  const [selectedFe, setSelectedFe]  = useState<Extinguisher | null>(null); // 배치할 소화기
-  const [pendingPos, setPendingPos]  = useState<{ x: number; y: number } | null>(null);
-  const [editTarget, setEditTarget]  = useState<Extinguisher | null>(null); // 편집 모달 대상
-  const [hoveredId,  setHoveredId]   = useState<string | null>(null);
+
+  // 기존 마커 위치지정 모드 (편집 모드에서 미배치 소화기 선택 후 클릭)
+  const [selectedFe, setSelectedFe]     = useState<Extinguisher | null>(null);
+  const [pendingPos, setPendingPos]     = useState<{ x: number; y: number } | null>(null);
+
+  // 신규 소화기 추가 모드 ([+ 소화기 추가] 버튼)
+  const [addMode,      setAddMode]      = useState(false);
+  const [addPendingPos, setAddPendingPos] = useState<{ x: number; y: number } | null>(null);
+
+  // 편집 모달 (기존 마커 클릭)
+  const [editTarget, setEditTarget]     = useState<Extinguisher | null>(null);
+
+  const [hoveredId,  setHoveredId]      = useState<string | null>(null);
 
   /* ── 드래그 이동 상태 ── */
-  const draggingMarker = useRef<{ id: string; startX: number; startY: number } | null>(null);
-  const isDraggingMarker = useRef(false);
+  const draggingMarker    = useRef<{ id: string; startX: number; startY: number } | null>(null);
+  const isDraggingMarker  = useRef(false);
 
   /* ── 뷰 패닝용 ── */
   const pointerDown = useRef<{ x: number; y: number } | null>(null);
@@ -362,29 +572,27 @@ function FloorView({
     if (!editMode) return;
     e.stopPropagation();
     e.preventDefault();
-    draggingMarker.current = { id: fe.id, startX: e.clientX, startY: e.clientY };
-    isDraggingMarker.current = false;
+    draggingMarker.current    = { id: fe.id, startX: e.clientX, startY: e.clientY };
+    isDraggingMarker.current  = false;
   }, [editMode]);
 
   /* ── 캔버스 MouseDown ── */
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
-    if (draggingMarker.current) return; // 마커 드래그 중이면 패닝 금지
+    if (draggingMarker.current) return;
     pointerDown.current = { x: e.clientX, y: e.clientY };
-    didDrag.current = false;
-    panOrigin.current = { mx: e.clientX, my: e.clientY, ox: offset.x, oy: offset.y };
+    didDrag.current     = false;
+    panOrigin.current   = { mx: e.clientX, my: e.clientY, ox: offset.x, oy: offset.y };
   }, [offset]);
 
   /* ── 캔버스 MouseMove ── */
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    // 마커 드래그
     if (draggingMarker.current) {
       const dx = e.clientX - draggingMarker.current.startX;
       const dy = e.clientY - draggingMarker.current.startY;
       if (Math.sqrt(dx * dx + dy * dy) > 3) isDraggingMarker.current = true;
-      return; // 마커 드래그 중엔 패닝 막음
+      return;
     }
-    // 뷰 패닝
     if (pointerDown.current) {
       const dx = e.clientX - pointerDown.current.x;
       const dy = e.clientY - pointerDown.current.y;
@@ -413,8 +621,8 @@ function FloorView({
           }
         }
       }
-      draggingMarker.current = null;
-      isDraggingMarker.current = false;
+      draggingMarker.current    = null;
+      isDraggingMarker.current  = false;
       return;
     }
 
@@ -424,14 +632,23 @@ function FloorView({
     panOrigin.current   = null;
     if (wasDrag) return;
 
-    // 편집 모드 + 소화기 선택됨 → 위치 임시 지정
+    // [+ 소화기 추가] 배치 모드 → 클릭 위치 저장 후 정보입력 모달
+    if (addMode) {
+      const pt = clientToRatio(e.clientX, e.clientY);
+      if (pt) {
+        setAddPendingPos(pt);
+      }
+      return;
+    }
+
+    // 편집 모드 + 기존 소화기 선택됨 → 위치 임시 지정
     if (editMode && selectedFe) {
       const pt = clientToRatio(e.clientX, e.clientY);
       if (pt) setPendingPos(pt);
     }
-  }, [editMode, selectedFe, clientToRatio, floor.id]);
+  }, [addMode, editMode, selectedFe, clientToRatio, floor.id]);
 
-  /* ── 임시 마커 확정 ── */
+  /* ── 기존 미배치 소화기 위치 확정 ── */
   const confirmPlace = useCallback(() => {
     if (!selectedFe || !pendingPos) return;
     saveExtinguisherPosition(selectedFe.id, floor.id, pendingPos.x, pendingPos.y);
@@ -444,13 +661,22 @@ function FloorView({
     setSelectedFe(null);
   }, [selectedFe, pendingPos, floor.id]);
 
+  /* ── 신규 소화기 추가 저장 ── */
+  const handleAddSave = useCallback((fe: Extinguisher) => {
+    addNewExtinguisher(fe);
+    setMarkers(prev => [...prev, fe]);
+    setAddPendingPos(null);
+    setAddMode(false);
+  }, []);
+
   /* ── 마커 클릭 → 편집 모달 (일반 모드) ── */
   const onMarkerClick = useCallback((e: React.MouseEvent, fe: Extinguisher) => {
     e.stopPropagation();
     if (isDraggingMarker.current) return;
-    if (editMode) return; // 편집 모드에서는 드래그만
+    if (editMode) return;
+    if (addMode) return;
     setEditTarget(fe);
-  }, [editMode]);
+  }, [editMode, addMode]);
 
   /* ── 편집 저장 ── */
   const handleSave = useCallback((updated: Extinguisher) => {
@@ -473,14 +699,33 @@ function FloorView({
   useEffect(() => {
     const fn = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setPendingPos(null); setSelectedFe(null); setEditTarget(null);
+        setPendingPos(null);
+        setSelectedFe(null);
+        setEditTarget(null);
+        setAddPendingPos(null);
+        setAddMode(false);
       }
     };
     window.addEventListener('keydown', fn);
     return () => window.removeEventListener('keydown', fn);
   }, []);
 
-  const cursor = editMode && selectedFe ? 'crosshair' : 'grab';
+  const cursor = addMode
+    ? 'crosshair'
+    : (editMode && selectedFe ? 'crosshair' : 'grab');
+
+  /* ── 이미지 style: 화질 최우선, will-change 제거 ── */
+  const sharpImgStyle: React.CSSProperties = {
+    display: 'block',
+    width: imgW,
+    height: imgH,
+    imageRendering: 'pixelated' as React.CSSProperties['imageRendering'],
+    WebkitBackfaceVisibility: 'hidden' as React.CSSProperties['WebkitBackfaceVisibility'],
+    backfaceVisibility: 'hidden' as React.CSSProperties['backfaceVisibility'],
+    userSelect: 'none',
+    pointerEvents: 'none',
+    // will-change 는 의도적으로 설정하지 않음 (화질 뭉개짐 원인)
+  };
 
   return (
     <div className="flex" style={{ height: 'calc(100vh - 108px)' }}>
@@ -512,12 +757,12 @@ function FloorView({
             {/* 줌 컨트롤 */}
             <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg px-2 py-1">
               <button
-                onClick={() => setScale(s => { const n = Math.min(MAX_SCALE, s*1.25); setOffset(o => clampOffset(o.x,o.y,n)); return n; })}
+                onClick={() => setScale(s => { const n = Math.min(MAX_SCALE, s * 1.25); setOffset(o => clampOffset(o.x, o.y, n)); return n; })}
                 className="w-7 h-7 flex items-center justify-center text-gray-600 hover:text-blue-600 font-bold text-lg"
               >+</button>
-              <span className="text-xs text-gray-500 w-14 text-center tabular-nums">{Math.round(scale*100)}%</span>
+              <span className="text-xs text-gray-500 w-14 text-center tabular-nums">{Math.round(scale * 100)}%</span>
               <button
-                onClick={() => setScale(s => { const n = Math.max(containScale, s*0.8); setOffset(o => clampOffset(o.x,o.y,n)); return n; })}
+                onClick={() => setScale(s => { const n = Math.max(containScale, s * 0.8); setOffset(o => clampOffset(o.x, o.y, n)); return n; })}
                 className="w-7 h-7 flex items-center justify-center text-gray-600 hover:text-blue-600 font-bold text-lg"
               >−</button>
               <button onClick={resetView} className="ml-1 text-gray-400 hover:text-blue-600 px-1" title="전체 보기">
@@ -527,9 +772,52 @@ function FloorView({
                 </svg>
               </button>
             </div>
+
+            {/* [+ 소화기 추가] 버튼 */}
+            <button
+              onClick={() => {
+                setAddMode(p => {
+                  const next = !p;
+                  if (next) {
+                    // 추가 모드 ON → 편집 모드 OFF
+                    setEditMode(false);
+                    setSelectedFe(null);
+                    setPendingPos(null);
+                  } else {
+                    setAddPendingPos(null);
+                  }
+                  return next;
+                });
+              }}
+              className={[
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all',
+                addMode
+                  ? 'bg-blue-700 text-white ring-2 ring-blue-300'
+                  : 'bg-blue-600 text-white hover:bg-blue-700',
+              ].join(' ')}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4"/>
+              </svg>
+              {addMode ? '도면 클릭으로 위치 지정 (ESC 취소)' : '소화기 추가'}
+            </button>
+
             {/* 편집 토글 */}
             <button
-              onClick={() => { setEditMode(p => !p); setSelectedFe(null); setPendingPos(null); }}
+              onClick={() => {
+                setEditMode(p => {
+                  const next = !p;
+                  if (next) {
+                    // 편집 모드 ON → 추가 모드 OFF
+                    setAddMode(false);
+                    setAddPendingPos(null);
+                  } else {
+                    setSelectedFe(null);
+                    setPendingPos(null);
+                  }
+                  return next;
+                });
+              }}
               className={[
                 'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all',
                 editMode
@@ -541,21 +829,28 @@ function FloorView({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
               </svg>
-              {editMode ? '편집 중… (ESC 취소)' : '소화기 위치 편집'}
+              {editMode ? '편집 중… (ESC 취소)' : '위치 편집'}
             </button>
           </div>
         </div>
 
-        {/* 편집 안내 배너 */}
-        {editMode && (
-          <div className="flex items-center gap-2 px-4 py-1.5 bg-orange-50 border-b border-orange-200 text-orange-700 text-xs flex-shrink-0">
+        {/* 안내 배너 */}
+        {(addMode || editMode) && (
+          <div className={[
+            'flex items-center gap-2 px-4 py-1.5 border-b text-xs flex-shrink-0',
+            addMode
+              ? 'bg-blue-50 border-blue-200 text-blue-700'
+              : 'bg-orange-50 border-orange-200 text-orange-700',
+          ].join(' ')}>
             <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                 d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
             </svg>
-            {selectedFe
-              ? <span><strong className="text-blue-700">{selectedFe.id}</strong> 선택됨 – 도면 클릭으로 위치 지정 · 배치된 마커를 드래그해 이동</span>
-              : <span>오른쪽 목록에서 소화기 선택 후 도면 클릭 배치 · 배치된 마커 드래그로 이동 · 일반 모드에서 클릭 시 편집 모달</span>
+            {addMode
+              ? <span>📍 도면의 원하는 위치를 <strong>클릭</strong>하면 소화기를 추가할 수 있습니다 · ESC로 취소</span>
+              : selectedFe
+                ? <span><strong className="text-blue-700">{selectedFe.id}</strong> 선택됨 – 도면 클릭으로 위치 지정 · 배치된 마커를 드래그해 이동</span>
+                : <span>오른쪽 목록에서 소화기 선택 후 도면 클릭 배치 · 배치된 마커 드래그로 이동 · 일반 모드에서 클릭 시 편집 모달</span>
             }
           </div>
         )}
@@ -570,12 +865,12 @@ function FloorView({
           onMouseUp={handleMouseUp}
           onMouseLeave={() => {
             if (draggingMarker.current) {
-              draggingMarker.current = null;
+              draggingMarker.current   = null;
               isDraggingMarker.current = false;
             }
             pointerDown.current = null;
-            didDrag.current = false;
-            panOrigin.current = null;
+            didDrag.current     = false;
+            panOrigin.current   = null;
           }}
           onWheel={handleWheel}
         >
@@ -587,9 +882,10 @@ function FloorView({
               position: 'relative',
               transformOrigin: '50% 50%',
               transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
+              /* will-change 제거 — 화질 뭉개짐 방지 */
             }}
           >
-            {/* 도면 이미지 */}
+            {/* ── 도면 이미지: 화질 선명 고정 ── */}
             <img
               ref={imgRef}
               src={floor.img}
@@ -597,17 +893,7 @@ function FloorView({
               draggable={false}
               width={imgW}
               height={imgH}
-              style={{
-                display: 'block',
-                width: imgW,
-                height: imgH,
-                imageRendering: 'pixelated',
-                backfaceVisibility: 'hidden',
-                WebkitBackfaceVisibility: 'hidden',
-                transformStyle: 'preserve-3d',
-                userSelect: 'none',
-                pointerEvents: 'none',
-              } as React.CSSProperties}
+              style={sharpImgStyle}
             />
 
             {/* SVG 마커 오버레이 */}
@@ -621,8 +907,8 @@ function FloorView({
             >
               {/* 배치된 소화기 마커 */}
               {markers.map(fe => {
-                const mx = (fe.mapX ?? 0) * imgW;
-                const my = (fe.mapY ?? 0) * imgH;
+                const mx    = (fe.mapX ?? 0) * imgW;
+                const my    = (fe.mapY ?? 0) * imgH;
                 const color = STATUS_COLOR[fe.status] ?? '#6b7280';
                 const isHov = hoveredId === fe.id;
                 return (
@@ -636,14 +922,12 @@ function FloorView({
                       if (!isDraggingMarker.current) onMarkerClick(e as unknown as React.MouseEvent, fe);
                     }}
                   >
-                    {/* 외곽 링 (호버) */}
                     {isHov && (
                       <circle cx={mx} cy={my} r={20}
                         fill={color} fillOpacity={0.15}
                         stroke={color} strokeWidth={1.5} strokeDasharray="3 2"
                         style={{ pointerEvents: 'none' }}/>
                     )}
-                    {/* 마커 원 */}
                     <circle
                       cx={mx} cy={my}
                       r={isHov ? 15 : 12}
@@ -653,20 +937,18 @@ function FloorView({
                       strokeWidth={2.5}
                       style={{ transition: 'r .1s', filter: isHov ? `drop-shadow(0 2px 6px ${color}99)` : 'none' }}
                     />
-                    {/* 소화기 아이콘 */}
-                    <text x={mx} y={my+5} textAnchor="middle" fontSize={13}
+                    <text x={mx} y={my + 5} textAnchor="middle" fontSize={13}
                       style={{ pointerEvents: 'none', userSelect: 'none' }}>🧯</text>
-                    {/* 툴팁 */}
                     {isHov && (
                       <g style={{ pointerEvents: 'none' }}>
-                        <rect x={mx-44} y={my-38} width={88} height={22} rx={6}
+                        <rect x={mx - 44} y={my - 38} width={88} height={22} rx={6}
                           fill="rgba(15,15,30,0.82)"/>
-                        <text x={mx} y={my-22} textAnchor="middle"
+                        <text x={mx} y={my - 22} textAnchor="middle"
                           fontSize={9.5} fill="white" fontWeight="700"
                           fontFamily="-apple-system,'Malgun Gothic',sans-serif">
                           {fe.id}
                         </text>
-                        <text x={mx} y={my-10} textAnchor="middle"
+                        <text x={mx} y={my - 10} textAnchor="middle"
                           fontSize={8.5} fill={color} fontWeight="600"
                           fontFamily="-apple-system,'Malgun Gothic',sans-serif">
                           {STATUS_LABEL[fe.status] ?? fe.status}
@@ -677,22 +959,24 @@ function FloorView({
                 );
               })}
 
-              {/* 임시 배치 마커 */}
+              {/* 기존 소화기 임시 배치 마커 (편집 모드) */}
               {pendingPos && (
                 <g style={{ pointerEvents: 'none' }}>
                   <circle
                     cx={pendingPos.x * imgW} cy={pendingPos.y * imgH}
                     r={14} fill="#3b82f6" fillOpacity={0.85}
                     stroke="white" strokeWidth={2.5} strokeDasharray="4 2"/>
-                  <text x={pendingPos.x*imgW} y={pendingPos.y*imgH+5}
+                  <text x={pendingPos.x * imgW} y={pendingPos.y * imgH + 5}
                     textAnchor="middle" fontSize={13}
                     style={{ userSelect: 'none' }}>📍</text>
                 </g>
               )}
+
+              {/* 신규 소화기 임시 마커 (추가 모드 클릭 전 미리보기 없음 — 클릭 즉시 모달) */}
             </svg>
           </div>
 
-          {/* 위치 확인 팝업 */}
+          {/* 기존 소화기 위치 확인 팝업 (편집 모드) */}
           {pendingPos && selectedFe && (
             <div
               className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-white rounded-2xl shadow-2xl px-5 py-4 z-30 flex items-center gap-4"
@@ -715,7 +999,7 @@ function FloorView({
             </div>
           )}
 
-          {/* 줌 레벨 */}
+          {/* 줌 레벨 표시 */}
           <div className="absolute top-3 left-3 text-gray-600 text-xs font-mono rounded px-2 py-1 pointer-events-none"
             style={{ background: 'rgba(255,255,255,0.75)', zIndex: 20 }}>
             ×{scale.toFixed(2)}
@@ -748,7 +1032,7 @@ function FloorView({
                   return (
                     <li key={fe.id}>
                       <button
-                        onClick={() => { if (!editMode) setEditTarget(fe); }}
+                        onClick={() => { if (!editMode && !addMode) setEditTarget(fe); }}
                         onMouseEnter={() => setHoveredId(fe.id)}
                         onMouseLeave={() => setHoveredId(null)}
                         className={[
@@ -761,7 +1045,7 @@ function FloorView({
                           <p className="text-xs font-bold text-gray-700 truncate">{fe.id}</p>
                           <p className="text-[10px] truncate" style={{ color }}>{fe.status}</p>
                         </div>
-                        {!editMode && (
+                        {!editMode && !addMode && (
                           <svg className="w-3.5 h-3.5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                               d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
@@ -779,7 +1063,7 @@ function FloorView({
           }
         </div>
 
-        {/* 미배치 소화기 (편집 모드) */}
+        {/* 미배치 소화기 (편집 모드에서만 표시) */}
         {editMode && (
           <>
             <div className="px-4 py-2.5 border-t border-b border-orange-100 bg-orange-50">
@@ -843,13 +1127,23 @@ function FloorView({
         </div>
       </div>
 
-      {/* 편집 모달 */}
+      {/* 기존 소화기 편집 모달 */}
       {editTarget && (
         <EditModal
           item={editTarget}
           onSave={handleSave}
           onClose={() => setEditTarget(null)}
           onRemoveFromMap={handleRemoveFromMap}
+        />
+      )}
+
+      {/* 신규 소화기 추가 모달 */}
+      {addPendingPos && (
+        <AddModal
+          floor={floor}
+          pendingRatio={addPendingPos}
+          onSave={handleAddSave}
+          onClose={() => { setAddPendingPos(null); }}
         />
       )}
     </div>
@@ -860,16 +1154,16 @@ function FloorView({
    유틸 (조감도용)
 ───────────────────────────────────────── */
 function toSvgPts(pts: Point[], W: number, H: number) {
-  return pts.map(p => `${p.x*W},${p.y*H}`).join(' ');
+  return pts.map(p => `${p.x * W},${p.y * H}`).join(' ');
 }
 function centroid(pts: Point[], W: number, H: number) {
   return {
-    cx: pts.reduce((s,p) => s+p.x, 0) / pts.length * W,
-    cy: pts.reduce((s,p) => s+p.y, 0) / pts.length * H,
+    cx: pts.reduce((s, p) => s + p.x, 0) / pts.length * W,
+    cy: pts.reduce((s, p) => s + p.y, 0) / pts.length * H,
   };
 }
 function imgDist(a: Point, b: Point, W: number, H: number) {
-  return Math.sqrt(((a.x-b.x)*W)**2 + ((a.y-b.y)*H)**2);
+  return Math.sqrt(((a.x - b.x) * W) ** 2 + ((a.y - b.y) * H) ** 2);
 }
 
 /* ─────────────────────────────────────────
@@ -913,11 +1207,11 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
     if (pointerDown.current) {
       const dx = e.clientX - pointerDown.current.x;
       const dy = e.clientY - pointerDown.current.y;
-      if (Math.sqrt(dx*dx+dy*dy) > DRAG_THRESHOLD) didDrag.current = true;
+      if (Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) didDrag.current = true;
     }
     if (!drawMode && panOrigin.current && didDrag.current) {
       const { mx, my, ox, oy } = panOrigin.current;
-      setOffset(clampOffset(ox+(e.clientX-mx), oy+(e.clientY-my), scale));
+      setOffset(clampOffset(ox + (e.clientX - mx), oy + (e.clientY - my), scale));
     }
     if (drawMode) setCursorPt(clientToRatio(e.clientX, e.clientY));
   }, [drawMode, scale, clientToRatio, clampOffset]);
@@ -925,12 +1219,15 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
     const wasDrag = didDrag.current;
-    pointerDown.current = null; didDrag.current = false; panOrigin.current = null;
+    pointerDown.current = null;
+    didDrag.current     = false;
+    panOrigin.current   = null;
     if (!drawMode || wasDrag) return;
     const pt = clientToRatio(e.clientX, e.clientY);
     if (!pt) return;
     if (draft.length >= 3 && imgDist(pt, draft[0], AERIAL_W, AERIAL_H) < CLOSE_THRESHOLD) {
-      triggerClose(draft); return;
+      triggerClose(draft);
+      return;
     }
     setDraft(prev => [...prev, pt]);
   }, [drawMode, draft, clientToRatio]);
@@ -944,10 +1241,13 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
   const triggerClose = useCallback((cur: Point[]) => {
     const name = window.prompt('건물 이름을 입력하세요\n예: 관리동, 원료창고, 생산1동', '');
     if (!name?.trim()) return;
-    const color = PALETTE[polygons.length % PALETTE.length];
+    const color   = PALETTE[polygons.length % PALETTE.length];
     const newPoly: BuildingPolygon = { id: `poly-${Date.now()}`, name: name.trim(), points: cur, color };
     setPolygons(addPolygon(newPoly));
-    setDraft([]); setCursorPt(null); setDrawMode(false); setSelectedId(newPoly.id);
+    setDraft([]);
+    setCursorPt(null);
+    setDrawMode(false);
+    setSelectedId(newPoly.id);
   }, [polygons.length]);
 
   const handleDelete = useCallback((id: string, e?: React.MouseEvent) => {
@@ -959,7 +1259,11 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
 
   useEffect(() => {
     const fn = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && drawMode) { setDraft([]); setCursorPt(null); setDrawMode(false); }
+      if (e.key === 'Escape' && drawMode) {
+        setDraft([]);
+        setCursorPt(null);
+        setDrawMode(false);
+      }
     };
     window.addEventListener('keydown', fn);
     return () => window.removeEventListener('keydown', fn);
@@ -970,9 +1274,9 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
   const focusPolygon = useCallback((poly: BuildingPolygon) => {
     setSelectedId(poly.id);
     const { cx, cy } = centroid(poly.points, AERIAL_W, AERIAL_H);
-    const ts = Math.min(MAX_SCALE, Math.max(containScale*2.5, 2));
+    const ts = Math.min(MAX_SCALE, Math.max(containScale * 2.5, 2));
     setScale(ts);
-    setOffset(clampOffset(-(cx-AERIAL_W/2)*ts, -(cy-AERIAL_H/2)*ts, ts));
+    setOffset(clampOffset(-(cx - AERIAL_W / 2) * ts, -(cy - AERIAL_H / 2) * ts, ts));
   }, [containScale, clampOffset]);
 
   const onPolyClick = useCallback((poly: BuildingPolygon, e: React.MouseEvent) => {
@@ -990,6 +1294,19 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
   const nearFirst = draft.length >= 3 && cursorPt !== null
     && imgDist(cursorPt, draft[0], AERIAL_W, AERIAL_H) < CLOSE_THRESHOLD;
 
+  /* 조감도 이미지 style: 화질 선명 고정 */
+  const aerialImgStyle: React.CSSProperties = {
+    display: 'block',
+    width: AERIAL_W,
+    height: AERIAL_H,
+    imageRendering: 'pixelated' as React.CSSProperties['imageRendering'],
+    WebkitBackfaceVisibility: 'hidden' as React.CSSProperties['WebkitBackfaceVisibility'],
+    backfaceVisibility: 'hidden' as React.CSSProperties['backfaceVisibility'],
+    userSelect: 'none',
+    pointerEvents: 'none',
+    /* will-change 제거 */
+  };
+
   return (
     <div className="flex" style={{ height: 'calc(100vh - 108px)' }}>
       <div className="flex flex-col flex-1 min-w-0">
@@ -1004,10 +1321,12 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
           </div>
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg px-2 py-1">
-              <button onClick={() => setScale(s => { const n=Math.min(MAX_SCALE,s*1.25); setOffset(o=>clampOffset(o.x,o.y,n)); return n; })}
+              <button
+                onClick={() => setScale(s => { const n = Math.min(MAX_SCALE, s * 1.25); setOffset(o => clampOffset(o.x, o.y, n)); return n; })}
                 className="w-7 h-7 flex items-center justify-center text-gray-600 hover:text-blue-600 font-bold text-lg">+</button>
-              <span className="text-xs text-gray-500 w-14 text-center tabular-nums">{Math.round(scale*100)}%</span>
-              <button onClick={() => setScale(s => { const n=Math.max(containScale,s*0.8); setOffset(o=>clampOffset(o.x,o.y,n)); return n; })}
+              <span className="text-xs text-gray-500 w-14 text-center tabular-nums">{Math.round(scale * 100)}%</span>
+              <button
+                onClick={() => setScale(s => { const n = Math.max(containScale, s * 0.8); setOffset(o => clampOffset(o.x, o.y, n)); return n; })}
                 className="w-7 h-7 flex items-center justify-center text-gray-600 hover:text-blue-600 font-bold text-lg">−</button>
               <button onClick={resetView} className="ml-1 text-gray-400 hover:text-blue-600 px-1" title="전체 보기">
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1016,7 +1335,8 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
                 </svg>
               </button>
             </div>
-            <button onClick={toggleDraw}
+            <button
+              onClick={toggleDraw}
               className={['flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all select-none',
                 drawMode ? 'bg-orange-500 text-white ring-2 ring-orange-300' : 'bg-blue-600 text-white hover:bg-blue-700'].join(' ')}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1052,38 +1372,42 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
-          onMouseLeave={() => { pointerDown.current=null; didDrag.current=false; panOrigin.current=null; setCursorPt(null); }}
+          onMouseLeave={() => {
+            pointerDown.current = null;
+            didDrag.current     = false;
+            panOrigin.current   = null;
+            setCursorPt(null);
+          }}
           onDoubleClick={handleDblClick}
           onWheel={handleWheel}
         >
           <div style={{
-            width: AERIAL_W, height: AERIAL_H, flexShrink: 0, position: 'relative',
+            width: AERIAL_W, height: AERIAL_H,
+            flexShrink: 0, position: 'relative',
             transformOrigin: '50% 50%',
             transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
+            /* will-change 제거 */
           }}>
             <img
               ref={imgRef}
               src="/factory-aerial.jpg"
               alt="단양1공장 항공 조감도"
               draggable={false}
-              width={AERIAL_W} height={AERIAL_H}
-              style={{
-                display: 'block', width: AERIAL_W, height: AERIAL_H,
-                imageRendering: 'pixelated',
-                backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden',
-                transformStyle: 'preserve-3d', userSelect: 'none', pointerEvents: 'none',
-              } as React.CSSProperties}
+              width={AERIAL_W}
+              height={AERIAL_H}
+              style={aerialImgStyle}
             />
             <svg style={{
               position: 'absolute', top: 0, left: 0,
-              width: AERIAL_W, height: AERIAL_H, overflow: 'visible',
+              width: AERIAL_W, height: AERIAL_H,
+              overflow: 'visible',
               pointerEvents: drawMode ? 'none' : 'auto',
             }}>
               {polygons.map(poly => {
-                const isHov = hoveredId===poly.id || selectedId===poly.id;
-                const isSel = selectedId===poly.id;
+                const isHov    = hoveredId === poly.id || selectedId === poly.id;
+                const isSel    = selectedId === poly.id;
                 const { cx, cy } = centroid(poly.points, AERIAL_W, AERIAL_H);
-                const lw = Math.min(Math.max(poly.name.length*8+20, 64), 160);
+                const lw       = Math.min(Math.max(poly.name.length * 8 + 20, 64), 160);
                 const hasFloors = !!BUILDING_FLOORS[poly.name];
                 return (
                   <g key={poly.id} style={{ cursor: 'pointer' }}
@@ -1091,21 +1415,21 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
                     onMouseLeave={() => setHoveredId(null)}
                     onClick={e => onPolyClick(poly, e as unknown as React.MouseEvent)}
                   >
-                    <polygon points={toSvgPts(poly.points,AERIAL_W,AERIAL_H)}
+                    <polygon points={toSvgPts(poly.points, AERIAL_W, AERIAL_H)}
                       fill={poly.color} fillOpacity={isHov ? 0.52 : 0.28}
                       stroke={poly.color} strokeWidth={isSel ? 3 : isHov ? 2.5 : 1.8}
                       strokeLinejoin="round" strokeDasharray={isSel ? '8 3' : 'none'}
                       style={{ transition: 'fill-opacity .12s, stroke-width .12s' }}/>
                     {isSel && (
-                      <polygon points={toSvgPts(poly.points,AERIAL_W,AERIAL_H)}
+                      <polygon points={toSvgPts(poly.points, AERIAL_W, AERIAL_H)}
                         fill="none" stroke={poly.color} strokeWidth={6} strokeOpacity={0.25}
                         strokeLinejoin="round" style={{ pointerEvents: 'none' }}/>
                     )}
                     <g style={{ pointerEvents: 'none' }}>
-                      <rect x={cx-lw/2} y={cy-13} width={lw} height={26} rx={7}
+                      <rect x={cx - lw / 2} y={cy - 13} width={lw} height={26} rx={7}
                         fill={isHov ? poly.color : 'rgba(0,0,0,0.68)'}
                         style={{ transition: 'fill .12s' }}/>
-                      <text x={cx} y={cy+5} textAnchor="middle"
+                      <text x={cx} y={cy + 5} textAnchor="middle"
                         fontSize={12} fontWeight="700" fill="white"
                         fontFamily="-apple-system,'Malgun Gothic',sans-serif">
                         {poly.name}{hasFloors ? ' 🏢' : ''}
@@ -1114,8 +1438,9 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
                     {isHov && !drawMode && (
                       <g style={{ cursor: 'pointer' }}
                         onClick={e => { e.stopPropagation(); handleDelete(poly.id); }}>
-                        <circle cx={cx+lw/2+2} cy={cy-13} r={7} fill="#ef4444"/>
-                        <text x={cx+lw/2+2} y={cy-9} textAnchor="middle" fontSize={9} fill="white" fontWeight="bold">✕</text>
+                        <circle cx={cx + lw / 2 + 2} cy={cy - 13} r={7} fill="#ef4444"/>
+                        <text x={cx + lw / 2 + 2} y={cy - 9} textAnchor="middle"
+                          fontSize={9} fill="white" fontWeight="bold">✕</text>
                       </g>
                     )}
                   </g>
@@ -1125,35 +1450,36 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
               {draft.length > 0 && (
                 <g style={{ pointerEvents: 'none' }}>
                   {draft.length >= 3 && (
-                    <polygon points={toSvgPts(draft,AERIAL_W,AERIAL_H)} fill="#f97316" fillOpacity={0.15} stroke="none"/>
+                    <polygon points={toSvgPts(draft, AERIAL_W, AERIAL_H)}
+                      fill="#f97316" fillOpacity={0.15} stroke="none"/>
                   )}
-                  {draft.map((pt, i) => i===0 ? null : (
+                  {draft.map((pt, i) => i === 0 ? null : (
                     <line key={`s${i}`}
-                      x1={draft[i-1].x*AERIAL_W} y1={draft[i-1].y*AERIAL_H}
-                      x2={pt.x*AERIAL_W} y2={pt.y*AERIAL_H}
+                      x1={draft[i - 1].x * AERIAL_W} y1={draft[i - 1].y * AERIAL_H}
+                      x2={pt.x * AERIAL_W} y2={pt.y * AERIAL_H}
                       stroke="#f97316" strokeWidth={2} strokeLinecap="round"/>
                   ))}
                   {cursorPt && (
                     <line
-                      x1={draft[draft.length-1].x*AERIAL_W} y1={draft[draft.length-1].y*AERIAL_H}
-                      x2={cursorPt.x*AERIAL_W} y2={cursorPt.y*AERIAL_H}
+                      x1={draft[draft.length - 1].x * AERIAL_W} y1={draft[draft.length - 1].y * AERIAL_H}
+                      x2={cursorPt.x * AERIAL_W} y2={cursorPt.y * AERIAL_H}
                       stroke="#f97316" strokeWidth={1.5} strokeDasharray="5 4" opacity={0.65}/>
                   )}
                   {draft.map((pt, i) => {
-                    const isFirst = i===0;
+                    const isFirst = i === 0;
                     const hi = isFirst && nearFirst;
                     return (
                       <circle key={`d${i}`}
-                        cx={pt.x*AERIAL_W} cy={pt.y*AERIAL_H}
+                        cx={pt.x * AERIAL_W} cy={pt.y * AERIAL_H}
                         r={isFirst ? (hi ? 11 : 7) : 4.5}
                         fill={isFirst ? (hi ? '#22c55e' : '#f97316') : '#f97316'}
                         stroke="white" strokeWidth={2}
-                        style={{ transition:'r .1s, fill .1s',
+                        style={{ transition: 'r .1s, fill .1s',
                           filter: hi ? 'drop-shadow(0 0 5px #22c55e)' : 'none' }}/>
                     );
                   })}
                   {nearFirst && (
-                    <circle cx={draft[0].x*AERIAL_W} cy={draft[0].y*AERIAL_H} r={17}
+                    <circle cx={draft[0].x * AERIAL_W} cy={draft[0].y * AERIAL_H} r={17}
                       fill="none" stroke="#22c55e" strokeWidth={2}
                       strokeDasharray="4 3" opacity={0.85}/>
                   )}
@@ -1208,8 +1534,8 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
           ) : (
             <ul className="px-2 space-y-1">
               {polygons.map((poly, idx) => {
-                const isSel = selectedId===poly.id;
-                const isHov = hoveredId===poly.id;
+                const isSel     = selectedId === poly.id;
+                const isHov     = hoveredId  === poly.id;
                 const hasFloors = !!BUILDING_FLOORS[poly.name];
                 return (
                   <li key={poly.id}>
@@ -1222,7 +1548,7 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
                     >
                       <div className="flex-shrink-0 flex flex-col items-center gap-0.5">
                         <span className="w-3 h-3 rounded-full ring-2 ring-white shadow" style={{ backgroundColor: poly.color }}/>
-                        <span className="text-[9px] text-gray-300 font-mono leading-none">{String(idx+1).padStart(2,'0')}</span>
+                        <span className="text-[9px] text-gray-300 font-mono leading-none">{String(idx + 1).padStart(2, '0')}</span>
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className={`text-sm font-semibold truncate leading-tight ${isSel ? 'text-blue-700' : 'text-gray-800'}`}>
@@ -1238,8 +1564,10 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
                             d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
                         </svg>
                       )}
-                      <button onClick={e => handleDelete(poly.id, e)}
-                        className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors" title="삭제">
+                      <button
+                        onClick={e => handleDelete(poly.id, e)}
+                        className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+                        title="삭제">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                             d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2"/>
@@ -1262,7 +1590,13 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
           </div>
           {polygons.length > 0 && (
             <button
-              onClick={() => { if (window.confirm('모든 건물 영역을 삭제할까요?')) { polygons.forEach(p=>removePolygon(p.id)); setPolygons([]); setSelectedId(null); } }}
+              onClick={() => {
+                if (window.confirm('모든 건물 영역을 삭제할까요?')) {
+                  polygons.forEach(p => removePolygon(p.id));
+                  setPolygons([]);
+                  setSelectedId(null);
+                }
+              }}
               className="mt-2 w-full text-[11px] text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg py-1.5 transition-colors border border-dashed border-red-200 hover:border-red-300"
             >전체 삭제</button>
           )}
@@ -1276,9 +1610,9 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
    메인 MapView — 라우팅 제어
 ───────────────────────────────────────── */
 export default function MapView() {
-  const [view,             setView]             = useState<'aerial'|'floor-modal'|'floor-view'>('aerial');
-  const [selectedBuilding, setSelectedBuilding] = useState<string|null>(null);
-  const [selectedFloor,    setSelectedFloor]    = useState<FloorDef|null>(null);
+  const [view,             setView]             = useState<'aerial' | 'floor-modal' | 'floor-view'>('aerial');
+  const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null);
+  const [selectedFloor,    setSelectedFloor]    = useState<FloorDef | null>(null);
 
   const handleBuildingSelect = (name: string) => {
     setSelectedBuilding(name);
@@ -1294,14 +1628,14 @@ export default function MapView() {
     setSelectedFloor(null);
   };
 
-  if (view==='floor-view' && selectedFloor && selectedBuilding) {
+  if (view === 'floor-view' && selectedFloor && selectedBuilding) {
     return <FloorView floor={selectedFloor} buildingName={selectedBuilding} onBack={handleBack}/>;
   }
 
   return (
     <>
       <AerialView onBuildingSelect={handleBuildingSelect}/>
-      {view==='floor-modal' && selectedBuilding && BUILDING_FLOORS[selectedBuilding] && (
+      {view === 'floor-modal' && selectedBuilding && BUILDING_FLOORS[selectedBuilding] && (
         <FloorModal
           buildingName={selectedBuilding}
           floors={BUILDING_FLOORS[selectedBuilding]}

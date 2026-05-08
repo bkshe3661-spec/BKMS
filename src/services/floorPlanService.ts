@@ -79,3 +79,14 @@ export function getUnplacedExtinguishers(floor: string): Extinguisher[] {
 export function getExtinguisherById(id: string): Extinguisher | null {
   return loadAll().find(e => e.id === id) ?? null;
 }
+
+/** 신규 소화기 추가 (도면에서 직접 추가 시) */
+export function addNewExtinguisher(fe: Extinguisher): void {
+  const list = loadAll();
+  // 중복 ID 방지
+  if (list.some(e => e.id === fe.id)) {
+    saveAll(list.map(e => e.id === fe.id ? fe : e));
+  } else {
+    saveAll([...list, fe]);
+  }
+}
