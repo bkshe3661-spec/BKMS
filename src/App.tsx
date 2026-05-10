@@ -5,6 +5,7 @@ import MapView from './pages/extinguisher/MapView';
 import ListView from './pages/extinguisher/ListView';
 import type { GnbTab, ExtinguisherLnbTab } from './types/navigation';
 
+
 export default function App() {
   const [activeGnb, setActiveGnb] = useState<GnbTab>('extinguisher');
   const [activeLnb, setActiveLnb] = useState<ExtinguisherLnbTab>('map');
