@@ -12,6 +12,7 @@ import {
   removeExtinguisherPosition,
   getExtinguisherById,
   addNewExtinguisher,
+  getNextExtinguisherId,
 } from '../../services/floorPlanService';
 
 /* ─────────────────────────────────────────
@@ -355,8 +356,8 @@ function AddModal({
       alert('설치 위치를 입력하세요.');
       return;
     }
-    // ID 자동 생성: 타임스탬프 기반
-    const newId = `BK-FE-${Date.now().toString().slice(-6)}`;
+    // ID 자동 생성: 순번 방식 (BK-FE-001, 002, ...)
+    const newId = getNextExtinguisherId();
     const newFe: Extinguisher = {
       id: newId,
       location: form.location,

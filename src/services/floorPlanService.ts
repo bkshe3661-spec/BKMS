@@ -92,6 +92,19 @@ export function addNewExtinguisher(fe: Extinguisher): void {
 }
 
 /**
+ * 다음 순번 소화기 ID 반환 (BK-FE-001, 002, ...)
+ * 기존 목록에서 최대 번호를 찾아 +1
+ */
+export function getNextExtinguisherId(): string {
+  const list = loadAll();
+  const maxNum = list.reduce((acc, e) => {
+    const m = e.id.match(/BK-FE-(\d+)/);
+    return m ? Math.max(acc, parseInt(m[1], 10)) : acc;
+  }, 0);
+  return `BK-FE-${String(maxNum + 1).padStart(3, '0')}`;
+}
+
+/**
  * 소화기 데이터 전체 초기화
  * 기존에 사용하던 모든 키를 삭제하고 빈 배열로 초기화
  */
