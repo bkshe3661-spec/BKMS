@@ -16,9 +16,11 @@ import { initialExtinguishers } from '../data/initialData';
 const STORAGE_KEY = 'bkms_extinguishers';
 // const BASE_URL = 'http://your-api-server.com/api/v1'; // 🔄 백엔드 연동 시 활성화
 
-/** localStorage 초기화 (앱 최초 실행 시 1회) */
+/** localStorage 초기화 — 데이터가 없을 때만 샘플 삽입, 있으면 절대 덮어쓰지 않음 */
 export function initStorage(): void {
-  if (!localStorage.getItem(STORAGE_KEY)) {
+  const existing = localStorage.getItem(STORAGE_KEY);
+  // 키 자체가 없을 때만 초기 샘플 세팅 (빈 배열 []도 "있는 것"으로 간주해 건드리지 않음)
+  if (existing === null) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(initialExtinguishers));
   }
 }

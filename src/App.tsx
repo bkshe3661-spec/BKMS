@@ -1,19 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Header from './components/layout/Header';
 import LnbTabs from './components/layout/LnbTabs';
 import MapView from './pages/extinguisher/MapView';
 import ListView from './pages/extinguisher/ListView';
-import { initStorage } from './services/extinguisherService';
 import type { GnbTab, ExtinguisherLnbTab } from './types/navigation';
 
 export default function App() {
   const [activeGnb, setActiveGnb] = useState<GnbTab>('extinguisher');
   const [activeLnb, setActiveLnb] = useState<ExtinguisherLnbTab>('map');
-
-  // 앱 최초 실행 시 localStorage 초기 데이터 세팅
-  useEffect(() => {
-    initStorage();
-  }, []);
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-100">
