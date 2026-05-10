@@ -1,10 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
-import { getAllExtinguishers, resetStorage } from '../../services/extinguisherService';
-import { calcStatus, calcReplaceMonth, STATUS_STYLE } from '../../utils/statusCalc';
+import { getAllExtinguishers, updateExtinguisher, deleteExtinguisher } from '../../services/extinguisherService';
+import { calcStatus, calcReplaceMonth } from '../../utils/statusCalc';
 import type { Extinguisher } from '../../types/extinguisher';
 import type { ComputedStatus } from '../../utils/statusCalc';
 
-/* ── 타입 ── */
+/* ─────────────────────────────────────────
+   타입
+───────────────────────────────────────── */
 type FilterStatus = '전체' | ComputedStatus;
 
 interface EnrichedExtinguisher extends Extinguisher {
@@ -13,13 +15,20 @@ interface EnrichedExtinguisher extends Extinguisher {
   no: number;
 }
 
-/* ── 요약 카드 정의 (스크린샷 색상 정확히 반영) ── */
-const SUMMARY_CARDS: {
-  key: FilterStatus;
-  label: string;
-  gradient: string;
-  icon: JSX.Element;
-}[] = [
+/* ─────────────────────────────────────────
+   점검 체크리스트 항목 정의
+───────────────────────────────────────── */
+const CHECK_ITEMS = [
+  '안전핀 및 봉인 상태 확인',
+  '압력계(게이지) 정상 범위 확인',
+  '호스 및 노즐 파손 여부 확인',
+  '본체 부식, 변형, 누출 여부 확인',
+] as const;
+
+/* ─────────────────────────────────────────
+   요약 카드 정의
+───────────────────────────────────────── */
+const SUMMARY_CARDS: { key: FilterStatus; label: string; gradient: string; icon: JSX.Element }[] = [
   {
     key: '전체',
     label: '전체 소화기',
@@ -77,56 +86,526 @@ const SUMMARY_CARDS: {
   },
 ];
 
-/* ── 상태 뱃지 스타일 ── */
-const BADGE: Record<string, { bg: string; text: string; dot: string; icon: string }> = {
-  양호:    { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-500', icon: '●' },
-  점검필요: { bg: 'bg-amber-100',   text: 'text-amber-700',   dot: 'bg-amber-500',   icon: '●' },
-  교체대상: { bg: 'bg-red-100',     text: 'text-red-700',     dot: 'bg-red-500',     icon: '●' },
-  불량:    { bg: 'bg-purple-100',  text: 'text-purple-700',  dot: 'bg-purple-500',  icon: '●' },
+/* ─────────────────────────────────────────
+   상태 뱃지 스타일
+───────────────────────────────────────── */
+const BADGE: Record<string, { bg: string; text: string; dot: string }> = {
+  양호:    { bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-500' },
+  점검필요: { bg: 'bg-amber-100',   text: 'text-amber-700',   dot: 'bg-amber-500'   },
+  교체대상: { bg: 'bg-red-100',     text: 'text-red-700',     dot: 'bg-red-500'     },
+  불량:    { bg: 'bg-purple-100',  text: 'text-purple-700',  dot: 'bg-purple-500'  },
 };
 
-export default function ListView() {
-  const [data, setData] = useState<EnrichedExtinguisher[]>([]);
-  const [filterStatus, setFilterStatus] = useState<FilterStatus>('전체');
-  const [searchText, setSearchText] = useState('');
+/* ─────────────────────────────────────────
+   오늘 날짜 "YYYY-MM-DD" 반환
+───────────────────────────────────────── */
+function todayStr(): string {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
 
-  /* 데이터 로드 */
+/* ═══════════════════════════════════════════
+   점검 모달
+═══════════════════════════════════════════ */
+function InspectModal({
+  item,
+  onClose,
+  onDone,
+}: {
+  item: EnrichedExtinguisher;
+  onClose: () => void;
+  onDone: (updated: Extinguisher) => void;
+}) {
+  /* 각 항목 상태: true=정상, false=비정상, null=미선택 */
+  const [checks, setChecks] = useState<(boolean | null)[]>(
+    CHECK_ITEMS.map(() => null)
+  );
+
+  const toggle = (idx: number, val: boolean) => {
+    setChecks(prev => prev.map((v, i) => (i === idx ? val : v)));
+  };
+
+  const allSelected = checks.every(v => v !== null);
+  const allNormal   = checks.every(v => v === true);
+
+  const handleDone = async () => {
+    if (!allSelected) {
+      alert('모든 항목을 선택해 주세요.');
+      return;
+    }
+    const today = todayStr();
+    const newStatus = allNormal ? '정상' : '점검필요';
+    const updated: Extinguisher = {
+      ...item,
+      lastCheckDate: today,
+      status: newStatus as Extinguisher['status'],
+    };
+    await updateExtinguisher(updated);
+    onDone(updated);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.45)' }}
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-[480px] max-w-[95vw] overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* ── 헤더 ── */}
+        <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+          <div>
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <h2 className="text-lg font-bold text-gray-900">소화기 점검</h2>
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              항목별로 정상 여부를 선택하면 점검 결과가 자동으로 갱신됩니다.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* ── 소화기 요약 카드 ── */}
+        <div className="px-6 pt-4 pb-2">
+          <div className="flex items-center gap-3 p-3.5 bg-gray-50 rounded-xl border border-gray-100">
+            <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center flex-shrink-0">
+              <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C10.34 2 9 3.34 9 5v1H7c-1.1 0-2 .9-2 2v13c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-2V5c0-1.66-1.34-3-3-3zm0 2c.55 0 1 .45 1 1v1h-2V5c0-.55.45-1 1-1zm0 7c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0 6c-1.67 0-3-.9-3-2h6c0 1.1-1.33 2-3 2z"/>
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-bold text-gray-900">{item.location}</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {item.type}
+                {item.mfgDate && ` · 제조 ${item.mfgDate}`}
+                {` · ${item.id}`}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* ── 체크리스트 ── */}
+        <div className="px-6 py-2 space-y-0 divide-y divide-gray-100">
+          {CHECK_ITEMS.map((label, idx) => (
+            <div key={idx} className="flex items-center justify-between py-3.5">
+              {/* 번호 + 항목명 */}
+              <div className="flex items-center gap-3">
+                <span className="w-6 h-6 rounded-full bg-gray-100 text-gray-500
+                                 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                  {idx + 1}
+                </span>
+                <span className="text-sm text-gray-700">{label}</span>
+              </div>
+
+              {/* 정상 / 비정상 토글 */}
+              <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+                <button
+                  onClick={() => toggle(idx, true)}
+                  className={[
+                    'flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all',
+                    checks[idx] === true
+                      ? 'bg-emerald-500 text-white shadow-sm'
+                      : 'bg-gray-100 text-gray-400 hover:bg-gray-200',
+                  ].join(' ')}
+                >
+                  {checks[idx] === true && (
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                  정상
+                </button>
+                <button
+                  onClick={() => toggle(idx, false)}
+                  className={[
+                    'flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all',
+                    checks[idx] === false
+                      ? 'bg-red-500 text-white shadow-sm'
+                      : 'bg-gray-100 text-gray-400 hover:bg-gray-200',
+                  ].join(' ')}
+                >
+                  {checks[idx] === false && (
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  )}
+                  비정상
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* ── 결과 알림 (모든 항목 선택 시) ── */}
+        {allSelected && (
+          <div className={[
+            'mx-6 mb-3 px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-medium',
+            allNormal
+              ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+              : 'bg-red-50 text-red-600 border border-red-100',
+          ].join(' ')}>
+            {allNormal ? (
+              <>
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+                모든 항목 정상 — 점검 완료 시 양호로 갱신됩니다.
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                </svg>
+                비정상 항목 있음 — 점검 완료 시 점검필요로 갱신됩니다.
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── 하단 버튼 ── */}
+        <div className="px-6 pb-6 pt-2 flex gap-3">
+          <button
+            onClick={handleDone}
+            disabled={!allSelected}
+            className={[
+              'flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all',
+              allSelected
+                ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm'
+                : 'bg-gray-100 text-gray-300 cursor-not-allowed',
+            ].join(' ')}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            점검 완료
+          </button>
+          <button
+            onClick={onClose}
+            className="px-5 py-3 text-sm font-semibold text-gray-500 bg-gray-50 hover:bg-gray-100
+                       border border-gray-200 rounded-xl transition"
+          >
+            취소
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   수정 모달
+═══════════════════════════════════════════ */
+interface EditForm {
+  location: string;
+  type: string;
+  mfgDate: string;
+  manager: string;
+  lastCheckDate: string;
+  note: string;
+}
+
+function EditModal({
+  item,
+  onClose,
+  onSave,
+}: {
+  item: EnrichedExtinguisher;
+  onClose: () => void;
+  onSave: (updated: Extinguisher) => void;
+}) {
+  const [form, setForm] = useState<EditForm>({
+    location:      item.location,
+    type:          item.type,
+    mfgDate:       item.mfgDate,
+    manager:       item.manager,
+    lastCheckDate: item.lastCheckDate,
+    note:          item.note,
+  });
+
+  const set = (k: keyof EditForm, v: string) =>
+    setForm(f => ({ ...f, [k]: v }));
+
+  const handleSave = async () => {
+    if (!form.location.trim()) { alert('설치 위치를 입력하세요.'); return; }
+    if (!form.type.trim())     { alert('소화기 종류를 입력하세요.'); return; }
+    if (!form.mfgDate.trim())  { alert('제조년월을 입력하세요.'); return; }
+
+    const updated: Extinguisher = {
+      ...item,
+      location:      form.location.trim(),
+      type:          form.type.trim(),
+      mfgDate:       form.mfgDate.trim(),
+      manager:       form.manager.trim(),
+      lastCheckDate: form.lastCheckDate,
+      note:          form.note.trim(),
+    };
+    await updateExtinguisher(updated);
+    onSave(updated);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.45)' }}
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-[480px] max-w-[95vw] overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* ── 헤더 ── */}
+        <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5
+                   m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+            <h2 className="text-lg font-bold text-gray-900">소화기 정보 수정</h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* ── 폼 ── */}
+        <div className="px-6 py-5 space-y-4 max-h-[65vh] overflow-y-auto">
+
+          {/* 설치 위치 */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">
+              설치 위치 <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={form.location}
+              onChange={e => set('location', e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="예) 관리동 1층(현관)"
+            />
+          </div>
+
+          {/* 소화기 종류 */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">
+              소화기 종류 <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={form.type}
+              onChange={e => set('type', e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="예) ABC분말 3.3kg"
+            />
+          </div>
+
+          {/* 제조년월 */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">
+              제조년월 <span className="text-red-500">*</span>
+              <span className="text-gray-400 font-normal ml-1">(YYYY-MM)</span>
+            </label>
+            <input
+              type="text"
+              value={form.mfgDate}
+              onChange={e => set('mfgDate', e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="예) 2024-08"
+            />
+          </div>
+
+          {/* 담당자 */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">담당자</label>
+            <input
+              type="text"
+              value={form.manager}
+              onChange={e => set('manager', e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="담당자 이름"
+            />
+          </div>
+
+          {/* 최근 점검일 */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">최근 점검일</label>
+            <input
+              type="date"
+              value={form.lastCheckDate}
+              onChange={e => set('lastCheckDate', e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+
+          {/* 비고 */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">비고</label>
+            <textarea
+              value={form.note}
+              onChange={e => set('note', e.target.value)}
+              rows={2}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg resize-none
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="특이사항 입력"
+            />
+          </div>
+        </div>
+
+        {/* ── 하단 버튼 ── */}
+        <div className="px-6 pb-6 pt-2 flex gap-3 border-t border-gray-100">
+          <button
+            onClick={handleSave}
+            className="flex-1 flex items-center justify-center gap-2 py-3
+                       bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold
+                       rounded-xl transition shadow-sm"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+            </svg>
+            저장
+          </button>
+          <button
+            onClick={onClose}
+            className="px-5 py-3 text-sm font-semibold text-gray-500 bg-gray-50 hover:bg-gray-100
+                       border border-gray-200 rounded-xl transition"
+          >
+            취소
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   삭제 확인 모달
+═══════════════════════════════════════════ */
+function DeleteModal({
+  item,
+  onClose,
+  onDelete,
+}: {
+  item: EnrichedExtinguisher;
+  onClose: () => void;
+  onDelete: () => void;
+}) {
+  const handleDelete = async () => {
+    await deleteExtinguisher(item.id);
+    onDelete();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.45)' }}
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-[380px] max-w-[95vw] overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* ── 본문 ── */}
+        <div className="px-8 pt-8 pb-6 text-center">
+          {/* 휴지통 아이콘 */}
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-5">
+            <svg className="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7
+                   m5 4v6m4-6v6M1 7h22M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" />
+            </svg>
+          </div>
+
+          {/* 제목 */}
+          <h2 className="text-lg font-bold text-gray-900 mb-2">소화기를 삭제할까요?</h2>
+
+          {/* 설명 */}
+          <p className="text-sm text-gray-500">
+            <span className="font-semibold text-gray-700">"{item.location}"</span> 항목이 영구 삭제됩니다.
+          </p>
+        </div>
+
+        {/* ── 하단 버튼 ── */}
+        <div className="px-6 pb-6 flex gap-3">
+          <button
+            onClick={handleDelete}
+            className="flex-1 flex items-center justify-center gap-2 py-3
+                       bg-red-500 hover:bg-red-600 text-white text-sm font-bold
+                       rounded-xl transition shadow-sm"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7
+                   m5 4v6m4-6v6M1 7h22M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" />
+            </svg>
+            삭제
+          </button>
+          <button
+            onClick={onClose}
+            className="px-5 py-3 text-sm font-semibold text-gray-500 bg-gray-50 hover:bg-gray-100
+                       border border-gray-200 rounded-xl transition"
+          >
+            취소
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   메인 ListView 컴포넌트
+═══════════════════════════════════════════ */
+export default function ListView() {
+  const [data, setData]               = useState<EnrichedExtinguisher[]>([]);
+  const [filterStatus, setFilterStatus] = useState<FilterStatus>('전체');
+  const [searchText, setSearchText]   = useState('');
+
+  /* 모달 상태 */
+  const [inspectTarget, setInspectTarget] = useState<EnrichedExtinguisher | null>(null);
+  const [editTarget,    setEditTarget]    = useState<EnrichedExtinguisher | null>(null);
+  const [deleteTarget,  setDeleteTarget]  = useState<EnrichedExtinguisher | null>(null);
+
+  /* ── 데이터 로드 ── */
   const loadData = async () => {
     const raw = await getAllExtinguishers();
     const enriched: EnrichedExtinguisher[] = raw.map((item, idx) => ({
       ...item,
       computedStatus: calcStatus(item.mfgDate, item.lastCheckDate),
-      replaceMonth: calcReplaceMonth(item.mfgDate),
-      no: idx + 1,
+      replaceMonth:   calcReplaceMonth(item.mfgDate),
+      no:             idx + 1,
     }));
     setData(enriched);
   };
 
-  useEffect(() => {
-    loadData();
+  useEffect(() => { loadData(); }, []);
 
-    /* 헤더 버튼 이벤트 연결 */
-    const resetBtn = document.getElementById('header-reset-btn');
-    const addBtn   = document.getElementById('header-add-btn');
-
-    const handleReset = () => {
-      if (window.confirm('모든 데이터를 초기값으로 되돌릴까요?')) {
-        resetStorage();
-        loadData();
-        setFilterStatus('전체');
-        setSearchText('');
-      }
-    };
-    resetBtn?.addEventListener('click', handleReset);
-    // addBtn은 다음 단계(모달)에서 연결
-    void addBtn;
-
-    return () => {
-      resetBtn?.removeEventListener('click', handleReset);
-    };
-  }, []);
-
-  /* 집계 */
+  /* ── 집계 ── */
   const counts = useMemo(() => ({
     전체:    data.length,
     양호:    data.filter(d => d.computedStatus === '양호').length,
@@ -134,12 +613,10 @@ export default function ListView() {
     교체대상: data.filter(d => d.computedStatus === '교체대상').length,
   }), [data]);
 
-  /* 필터 + 검색 */
+  /* ── 필터 + 검색 ── */
   const filtered = useMemo(() => {
     let result =
-      filterStatus === '전체'
-        ? data
-        : data.filter(d => d.computedStatus === filterStatus);
+      filterStatus === '전체' ? data : data.filter(d => d.computedStatus === filterStatus);
     if (searchText.trim()) {
       const q = searchText.trim().toLowerCase();
       result = result.filter(d =>
@@ -151,9 +628,22 @@ export default function ListView() {
     return result;
   }, [data, filterStatus, searchText]);
 
-  /* 카드 클릭 */
-  const handleCardClick = (key: FilterStatus) => {
-    setFilterStatus(prev => prev === key ? '전체' : key);
+  /* ── 점검 완료 콜백 ── */
+  const handleInspectDone = (_updated: Extinguisher) => {
+    setInspectTarget(null);
+    loadData();
+  };
+
+  /* ── 수정 저장 콜백 ── */
+  const handleEditSave = (_updated: Extinguisher) => {
+    setEditTarget(null);
+    loadData();
+  };
+
+  /* ── 삭제 완료 콜백 ── */
+  const handleDeleteDone = () => {
+    setDeleteTarget(null);
+    loadData();
   };
 
   return (
@@ -162,33 +652,31 @@ export default function ListView() {
       {/* ── 요약 카드 5개 ── */}
       <div className="grid grid-cols-5 gap-4">
         {SUMMARY_CARDS.map(({ key, label, gradient, icon }) => {
-          const count = counts[key as keyof typeof counts] ?? 0;
+          const count    = counts[key as keyof typeof counts] ?? 0;
           const isActive = filterStatus === key;
           return (
             <button
-              key={key}
-              onClick={() => handleCardClick(key)}
+              key={label}
+              onClick={() => setFilterStatus(prev => prev === key ? '전체' : key)}
               className={[
                 gradient,
                 'relative rounded-xl p-5 text-left text-white transition-all shadow-md',
-                isActive ? 'ring-4 ring-white ring-offset-2 ring-offset-gray-200 scale-[1.02]' : 'hover:brightness-105 hover:shadow-lg',
+                isActive
+                  ? 'ring-4 ring-white ring-offset-2 ring-offset-gray-200 scale-[1.02]'
+                  : 'hover:brightness-105 hover:shadow-lg',
               ].join(' ')}
             >
-              {/* 아이콘 우측 상단 */}
               <div className="absolute top-4 right-4 opacity-60">{icon}</div>
-
-              {/* 텍스트 */}
               <p className="text-sm font-medium text-white/80 mb-1">{label}</p>
               <p className="text-4xl font-black text-white leading-none">
-                {count}
-                <span className="text-lg font-semibold ml-1">개</span>
+                {count}<span className="text-lg font-semibold ml-1">개</span>
               </p>
-
-              {/* 필터 중 표시 */}
               {isActive && (
                 <div className="mt-2 flex items-center gap-1 text-white/80 text-xs">
                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.293.707l-2 2A1 1 0 018 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd" />
+                    <path fillRule="evenodd"
+                      d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.293.707l-2 2A1 1 0 018 17v-5.586L3.293 6.707A1 1 0 013 6V3z"
+                      clipRule="evenodd" />
                   </svg>
                   필터 적용 중
                 </div>
@@ -200,10 +688,8 @@ export default function ListView() {
 
       {/* ── 검색창 ── */}
       <div className="relative max-w-sm">
-        <svg
-          className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
-          fill="none" stroke="currentColor" viewBox="0 0 24 24"
-        >
+        <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
+          fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
             d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
         </svg>
@@ -229,8 +715,6 @@ export default function ListView() {
 
       {/* ── 데이터 테이블 ── */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-
-        {/* 테이블 상단 항목 수 */}
         <div className="px-5 py-3 border-b border-gray-100">
           <span className="text-sm text-gray-500">
             <span className="font-semibold text-gray-800">{filtered.length}</span>개 항목
@@ -271,23 +755,15 @@ export default function ListView() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((item) => {
-                  const badge = BADGE[item.computedStatus] ?? BADGE['양호'];
-                  const isReplace = item.computedStatus === '교체대상';
+                filtered.map(item => {
+                  const badge        = BADGE[item.computedStatus] ?? BADGE['양호'];
+                  const isReplace    = item.computedStatus === '교체대상';
                   const isCheckNeeded = item.computedStatus === '점검필요';
-
-                  /* 위치 파싱 */
-                  const locParts = item.location.split(' - ');
-                  const locTop = locParts[0] ?? '';
-                  const locBot = locParts[1] ?? item.location;
-
-                  /* 교체년월 색상 */
+                  const locParts     = item.location.split(' - ');
+                  const locTop       = locParts[0] ?? '';
+                  const locBot       = locParts[1] ?? item.location;
                   const replaceColor = isReplace ? 'text-red-500 font-bold' : 'text-gray-500';
-
-                  /* 최근점검일 색상 - 스크린샷처럼 주황색 */
-                  const checkColor = isCheckNeeded || isReplace
-                    ? 'text-amber-500 font-medium'
-                    : 'text-gray-600';
+                  const checkColor   = isCheckNeeded || isReplace ? 'text-amber-500 font-medium' : 'text-gray-600';
 
                   return (
                     <tr
@@ -311,19 +787,13 @@ export default function ListView() {
 
                       {/* 설치 위치 */}
                       <td className="px-4 py-3.5">
-                        <div className="text-[11px] text-gray-400 mb-0.5 truncate max-w-[180px]">
-                          {locTop}
-                        </div>
-                        <div className="text-sm font-semibold text-gray-800">
-                          {locBot}
-                        </div>
+                        <div className="text-[11px] text-gray-400 mb-0.5 truncate max-w-[180px]">{locTop}</div>
+                        <div className="text-sm font-semibold text-gray-800">{locBot}</div>
                       </td>
 
                       {/* 소화기 종류 */}
                       <td className="px-4 py-3.5 whitespace-nowrap">
-                        <div className="text-xs text-gray-700 leading-snug">
-                          {item.type}
-                        </div>
+                        <div className="text-xs text-gray-700 leading-snug">{item.type}</div>
                       </td>
 
                       {/* 제조년월 */}
@@ -334,9 +804,7 @@ export default function ListView() {
                       {/* 교체년월 */}
                       <td className={`px-4 py-3.5 text-center text-xs whitespace-nowrap ${replaceColor}`}>
                         {item.replaceMonth}
-                        {isReplace && (
-                          <div className="text-[10px] text-red-400 mt-0.5">기한 초과</div>
-                        )}
+                        {isReplace && <div className="text-[10px] text-red-400 mt-0.5">기한 초과</div>}
                       </td>
 
                       {/* 최근 점검일 */}
@@ -346,11 +814,8 @@ export default function ListView() {
 
                       {/* 상태 뱃지 */}
                       <td className="px-4 py-3.5 text-center">
-                        <span className={`
-                          inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full
-                          text-xs font-semibold whitespace-nowrap
-                          ${badge.bg} ${badge.text}
-                        `}>
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full
+                                          text-xs font-semibold whitespace-nowrap ${badge.bg} ${badge.text}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
                           {item.computedStatus}
                         </span>
@@ -365,47 +830,56 @@ export default function ListView() {
                       <td className="px-4 py-3.5 text-xs text-gray-500 max-w-[120px]">
                         {item.note
                           ? <span className="text-amber-600">{item.note}</span>
-                          : <span className="text-gray-300">-</span>
-                        }
+                          : <span className="text-gray-300">-</span>}
                       </td>
 
-                      {/* 관리 */}
+                      {/* ── 관리 버튼 3개 ── */}
                       <td className="px-4 py-3.5">
                         <div className="flex items-center justify-center gap-1.5">
-                          {/* 점검 버튼 */}
-                          <button className="
-                            inline-flex items-center gap-1 px-2.5 py-1.5
-                            text-xs font-semibold text-white bg-blue-600
-                            rounded-md hover:bg-blue-700 transition whitespace-nowrap shadow-sm
-                          ">
+
+                          {/* 점검 */}
+                          <button
+                            onClick={() => setInspectTarget(item)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5
+                                       text-xs font-semibold text-white bg-blue-600
+                                       rounded-md hover:bg-blue-700 transition whitespace-nowrap shadow-sm"
+                          >
                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2
+                                   M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                             </svg>
                             점검
                           </button>
 
                           {/* 수정 */}
-                          <button className="
-                            p-1.5 text-gray-400 hover:text-blue-600
-                            hover:bg-blue-50 rounded-md transition
-                          " title="수정">
+                          <button
+                            onClick={() => setEditTarget(item)}
+                            className="p-1.5 text-gray-400 hover:text-amber-500
+                                       hover:bg-amber-50 rounded-md transition"
+                            title="수정"
+                          >
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5
+                                   m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                             </svg>
                           </button>
 
                           {/* 삭제 */}
-                          <button className="
-                            p-1.5 text-gray-400 hover:text-red-500
-                            hover:bg-red-50 rounded-md transition
-                          " title="삭제">
+                          <button
+                            onClick={() => setDeleteTarget(item)}
+                            className="p-1.5 text-gray-400 hover:text-red-500
+                                       hover:bg-red-50 rounded-md transition"
+                            title="삭제"
+                          >
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" />
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7
+                                   m5 4v6m4-6v6M1 7h22M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" />
                             </svg>
                           </button>
+
                         </div>
                       </td>
                     </tr>
@@ -416,6 +890,30 @@ export default function ListView() {
           </table>
         </div>
       </div>
+
+      {/* ── 모달 렌더링 ── */}
+      {inspectTarget && (
+        <InspectModal
+          item={inspectTarget}
+          onClose={() => setInspectTarget(null)}
+          onDone={handleInspectDone}
+        />
+      )}
+      {editTarget && (
+        <EditModal
+          item={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSave={handleEditSave}
+        />
+      )}
+      {deleteTarget && (
+        <DeleteModal
+          item={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDelete={handleDeleteDone}
+        />
+      )}
+
     </div>
   );
 }
