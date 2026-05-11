@@ -2,7 +2,7 @@
  * 소화기 상태 자동 계산 유틸
  *
  * 우선순위:
- *  0순위 불량     : status === '폐기' (수동 지정)
+ *  0순위 불량     : status === '폐기' (수동 지정) OR 점검 체크리스트 비정상 항목 존재
  *  1순위 교체대상 : 제조년월 + 10년 < 오늘
  *  2순위 점검필요 : 최근 점검일이 30일 초과 or 비어있음
  *  3순위 양호     : 최근 점검일이 30일 이내
@@ -42,10 +42,21 @@ export function calcReplaceMonth(mfgDate: string): string {
   return `${replaceYear}-${mm}`;
 }
 
-/** 상태 자동 계산 */
-export function calcStatus(mfgDate: string, lastCheckDate: string, status?: ExtinguisherStatus): ComputedStatus {
-  // 0순위: 불량 (status가 '폐기'로 수동 지정된 경우)
-  if (status === '폐기') return '불량';
+/**
+ * 상태 자동 계산
+ * @param mfgDate       제조년월 "YYYY-MM"
+ * @param lastCheckDate 최근 점검일 "YYYY-MM-DD"
+ * @param status        수동 지정 상태 (optional)
+ * @param hasAbnormal   점검 체크리스트 비정상 항목 존재 여부 (optional, default false)
+ */
+export function calcStatus(
+  mfgDate: string,
+  lastCheckDate: string,
+  status?: ExtinguisherStatus,
+  hasAbnormal?: boolean,
+): ComputedStatus {
+  // 0순위: 불량 — (a) status가 '폐기', 또는 (b) 체크리스트 비정상 항목 존재
+  if (status === '폐기' || hasAbnormal === true) return '불량';
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -70,8 +81,8 @@ export function calcStatus(mfgDate: string, lastCheckDate: string, status?: Exti
 
 /** 상태별 Tailwind 스타일 */
 export const STATUS_STYLE: Record<ComputedStatus, StatusStyle> = {
-  불량:    { label: '불량',    bg: 'bg-purple-100', text: 'text-purple-700', dot: 'bg-purple-500' },
+  불량:    { label: '불량',    bg: 'bg-red-100',    text: 'text-red-700',    dot: 'bg-red-500'    },
   양호:    { label: '양호',    bg: 'bg-green-100',  text: 'text-green-700',  dot: 'bg-green-500'  },
   점검필요: { label: '점검필요', bg: 'bg-orange-100', text: 'text-orange-700', dot: 'bg-orange-500' },
-  교체대상: { label: '교체대상', bg: 'bg-red-100',    text: 'text-red-700',    dot: 'bg-red-500'    },
+  교체대상: { label: '교체대상', bg: 'bg-purple-100', text: 'text-purple-700', dot: 'bg-purple-500' },
 };
