@@ -7,6 +7,7 @@ import {
 import {
   getExtinguishersOnFloor,
   getUnplacedExtinguishers,
+  getAllUnplacedExtinguishers,
   saveExtinguisherPosition,
   updateExtinguisherInfo,
   removeExtinguisherPosition,
@@ -466,7 +467,8 @@ function AddModal({
 /* ─────────────────────────────────────────
    내부 도면 뷰 (FloorView)
    - 상단 툴바: ← 뒤로가기 + 1층/2층 탭
-   - 오른쪽: 소화기 목록 사이드바
+   - 왼쪽: 도면 + 핀
+   - 오른쪽: 배치 대기 패널 (D&D) + 배치된 목록
 ───────────────────────────────────────── */
 function FloorView({
   building,
@@ -486,25 +488,34 @@ function FloorView({
     = useZoomPan(canvasRef, imgW, imgH);
 
   /* ── 소화기 상태 ── */
-  const [markers,  setMarkers]  = useState<Extinguisher[]>(() => getExtinguishersOnFloor(floor.id));
-  const [unplaced, setUnplaced] = useState<Extinguisher[]>(() => getUnplacedExtinguishers(floor.id));
-  const [editMode, setEditMode] = useState(false);
+  const [markers,      setMarkers]      = useState<Extinguisher[]>(() => getExtinguishersOnFloor(floor.id));
+  const [unplaced,     setUnplaced]     = useState<Extinguisher[]>(() => getUnplacedExtinguishers(floor.id));
+  // 전체 미배치 (floor 관계없이 좌표 없는 모든 소화기) — 배치 대기 패널용
+  const [allUnplaced,  setAllUnplaced]  = useState<Extinguisher[]>(() => getAllUnplacedExtinguishers());
+  const [editMode,     setEditMode]     = useState(false);
 
   /* 전체 소화기 ID 순서 맵 (NO. 배지 동기화) */
   const [allIdOrderMap, setAllIdOrderMap] = useState<Record<string, number>>({});
-  useEffect(() => {
+
+  /* 데이터 전체 새로고침 */
+  const refreshAll = useCallback(() => {
+    setMarkers(getExtinguishersOnFloor(floor.id));
+    setUnplaced(getUnplacedExtinguishers(floor.id));
+    setAllUnplaced(getAllUnplacedExtinguishers());
     getAllExtinguishers().then(all => {
       const map: Record<string, number> = {};
       all.forEach((fe, idx) => { map[fe.id] = idx + 1; });
       setAllIdOrderMap(map);
     });
-  }, [markers]);
+  }, [floor.id]);
+
+  useEffect(() => { refreshAll(); }, [refreshAll]);
 
   /* 기존 마커 위치지정 모드 */
   const [selectedFe, setSelectedFe] = useState<Extinguisher | null>(null);
   const [pendingPos, setPendingPos] = useState<{ x: number; y: number } | null>(null);
 
-  /* 신규 소화기 추가 모드 */
+  /* 신규 소화기 추가 모드 (도면 클릭) */
   const [addMode,       setAddMode]       = useState(false);
   const [addPendingPos, setAddPendingPos] = useState<{ x: number; y: number } | null>(null);
 
@@ -512,7 +523,15 @@ function FloorView({
   const [editTarget, setEditTarget] = useState<Extinguisher | null>(null);
   const [hoveredId,  setHoveredId]  = useState<string | null>(null);
 
-  /* 드래그 이동 */
+  /* ── 사이드 패널 D&D 상태 ── */
+  // 현재 패널에서 드래그 중인 소화기 ID
+  const [draggingPanelId,  setDraggingPanelId]  = useState<string | null>(null);
+  // 도면 위로 드래그 진입 여부 (drop zone 하이라이트)
+  const [dropOverMap,      setDropOverMap]       = useState(false);
+  // 드래그 커서 위치 (미리보기 핀)
+  const [dropCursorPos,    setDropCursorPos]     = useState<{ x: number; y: number } | null>(null);
+
+  /* 기존 마커 드래그 이동 */
   const draggingMarker   = useRef<{ id: string; startX: number; startY: number } | null>(null);
   const isDraggingMarker = useRef(false);
 
@@ -603,26 +622,22 @@ function FloorView({
     }
   }, [addMode, editMode, selectedFe, clientToRatio, floor.id]);
 
-  /* 기존 미배치 소화기 위치 확정 */
+  /* 기존 미배치 소화기 위치 확정 (클릭 배치 방식) */
   const confirmPlace = useCallback(() => {
     if (!selectedFe || !pendingPos) return;
     saveExtinguisherPosition(selectedFe.id, floor.id, pendingPos.x, pendingPos.y);
-    const updated = getExtinguisherById(selectedFe.id);
-    if (updated) {
-      setMarkers(prev => [...prev.filter(m => m.id !== updated.id), updated]);
-      setUnplaced(prev => prev.filter(u => u.id !== updated.id));
-    }
+    refreshAll();
     setPendingPos(null);
     setSelectedFe(null);
-  }, [selectedFe, pendingPos, floor.id]);
+  }, [selectedFe, pendingPos, floor.id, refreshAll]);
 
-  /* 신규 소화기 저장 */
+  /* 신규 소화기 저장 (addMode 클릭) */
   const handleAddSave = useCallback((fe: Extinguisher) => {
     addNewExtinguisher(fe);
-    setMarkers(prev => [...prev, fe]);
+    refreshAll();
     setAddPendingPos(null);
     setAddMode(false);
-  }, []);
+  }, [refreshAll]);
 
   /* 마커 클릭 → 편집 모달 */
   const onMarkerClick = useCallback((e: React.MouseEvent, fe: Extinguisher) => {
@@ -636,19 +651,75 @@ function FloorView({
   /* 편집 저장 */
   const handleSave = useCallback((updated: Extinguisher) => {
     updateExtinguisherInfo(updated);
-    setMarkers(prev => prev.map(m => m.id === updated.id ? updated : m));
+    refreshAll();
     setEditTarget(null);
-  }, []);
+  }, [refreshAll]);
 
   /* 도면에서 제거 */
   const handleRemoveFromMap = useCallback(() => {
     if (!editTarget) return;
     removeExtinguisherPosition(editTarget.id);
-    setMarkers(prev => prev.filter(m => m.id !== editTarget.id));
-    const fresh = getExtinguisherById(editTarget.id);
-    if (fresh) setUnplaced(prev => [...prev, fresh]);
+    refreshAll();
     setEditTarget(null);
-  }, [editTarget]);
+  }, [editTarget, refreshAll]);
+
+  /* ── 사이드 패널 D&D 핸들러 ── */
+
+  /** 패널 아이템 dragStart */
+  const onPanelDragStart = useCallback((e: React.DragEvent, fe: Extinguisher) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', fe.id);
+    setDraggingPanelId(fe.id);
+  }, []);
+
+  const onPanelDragEnd = useCallback(() => {
+    setDraggingPanelId(null);
+    setDropOverMap(false);
+    setDropCursorPos(null);
+  }, []);
+
+  /** 도면 영역에 드래그 진입 */
+  const onMapDragOver = useCallback((e: React.DragEvent) => {
+    if (!draggingPanelId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDropOverMap(true);
+    // 커서 위치 → 도면 비율 좌표 계산
+    const img = imgRef.current;
+    if (img) {
+      const r = img.getBoundingClientRect();
+      const x = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+      const y = Math.max(0, Math.min(1, (e.clientY - r.top)  / r.height));
+      setDropCursorPos({ x, y });
+    }
+  }, [draggingPanelId]);
+
+  const onMapDragLeave = useCallback((e: React.DragEvent) => {
+    // canvasRef 바깥으로 나갈 때만 초기화
+    const el = canvasRef.current;
+    if (el && !el.contains(e.relatedTarget as Node)) {
+      setDropOverMap(false);
+      setDropCursorPos(null);
+    }
+  }, []);
+
+  /** 도면 위에 드롭 → 좌표 저장 */
+  const onMapDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const id = e.dataTransfer.getData('text/plain');
+    if (!id) { setDropOverMap(false); setDropCursorPos(null); return; }
+    const img = imgRef.current;
+    if (img) {
+      const r = img.getBoundingClientRect();
+      const x = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+      const y = Math.max(0, Math.min(1, (e.clientY - r.top)  / r.height));
+      saveExtinguisherPosition(id, floor.id, x, y);
+      refreshAll();
+    }
+    setDraggingPanelId(null);
+    setDropOverMap(false);
+    setDropCursorPos(null);
+  }, [floor.id, refreshAll]);
 
   /* ESC */
   useEffect(() => {
@@ -659,23 +730,28 @@ function FloorView({
         setEditTarget(null);
         setAddPendingPos(null);
         setAddMode(false);
+        setDraggingPanelId(null);
+        setDropOverMap(false);
+        setDropCursorPos(null);
       }
     };
     window.addEventListener('keydown', fn);
     return () => window.removeEventListener('keydown', fn);
   }, []);
 
-  /* 층 전환 시 마커 재로드 */
+  /* 층 전환 시 데이터 재로드 */
   useEffect(() => {
-    setMarkers(getExtinguishersOnFloor(floor.id));
-    setUnplaced(getUnplacedExtinguishers(floor.id));
+    refreshAll();
     setEditMode(false);
     setAddMode(false);
     setPendingPos(null);
     setSelectedFe(null);
     setAddPendingPos(null);
     setEditTarget(null);
-  }, [floor.id]);
+    setDraggingPanelId(null);
+    setDropOverMap(false);
+    setDropCursorPos(null);
+  }, [floor.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cursor = addMode
     ? 'crosshair'
@@ -853,6 +929,9 @@ function FloorView({
             panOrigin.current   = null;
           }}
           onWheel={handleWheel}
+          onDragOver={onMapDragOver}
+          onDragLeave={onMapDragLeave}
+          onDrop={onMapDrop}
         >
           <div
             style={{
@@ -873,6 +952,13 @@ function FloorView({
               height={imgH}
               style={floorImgStyle}
             />
+
+            {/* 드롭 하이라이트 오버레이 */}
+            {dropOverMap && (
+              <div className="absolute inset-0 border-4 border-blue-400 border-dashed rounded-lg bg-blue-50/20 pointer-events-none z-10 flex items-center justify-center">
+                <span className="bg-blue-600 text-white text-sm font-bold px-4 py-2 rounded-xl shadow-lg">여기에 드롭하여 배치</span>
+              </div>
+            )}
 
             {/* SVG 마커 오버레이 */}
             <svg
@@ -954,6 +1040,21 @@ function FloorView({
                     textAnchor="middle" fontSize={13} style={{ userSelect: 'none' }}>📍</text>
                 </g>
               )}
+
+              {/* D&D 드롭 커서 미리보기 핀 */}
+              {dropCursorPos && draggingPanelId && (
+                <g style={{ pointerEvents: 'none' }}>
+                  <circle
+                    cx={dropCursorPos.x * imgW} cy={dropCursorPos.y * imgH}
+                    r={14} fill="#3b82f6" fillOpacity={0.7}
+                    stroke="white" strokeWidth={2.5} strokeDasharray="4 2"
+                  />
+                  <text
+                    x={dropCursorPos.x * imgW} y={dropCursorPos.y * imgH + 5}
+                    textAnchor="middle" fontSize={11} style={{ userSelect: 'none' }}
+                  >📍</text>
+                </g>
+              )}
             </svg>
           </div>
 
@@ -988,25 +1089,80 @@ function FloorView({
         </div>
       </div>
 
-      {/* ── 오른쪽 소화기 목록 사이드바 ── */}
-      <div className="flex-shrink-0 flex flex-col bg-white border-l border-gray-200" style={{ width: 220 }}>
+      {/* ── 오른쪽 소화기 목록 사이드바 (2섹션) ── */}
+      <div className="flex-shrink-0 flex flex-col bg-white border-l border-gray-200" style={{ width: 260 }}>
 
-        {/* 사이드바 헤더 */}
-        <div className="px-3 py-3 border-b border-gray-100 bg-gray-50">
-          <p className="text-xs font-bold text-gray-700">🧯 소화기 목록</p>
-          <p className="text-[10px] text-gray-400 mt-0.5">{floor.label} · {markers.length}개 배치</p>
+        {/* ① 배치 대기 섹션 */}
+        <div className="border-b border-gray-200 flex flex-col" style={{ maxHeight: '50%' }}>
+          {/* 배치 대기 헤더 */}
+          <div className="px-3 py-2.5 bg-orange-50 border-b border-orange-100 flex-shrink-0">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold text-orange-700">📦 배치 대기</p>
+              <span className="text-[10px] bg-orange-200 text-orange-700 rounded-full px-1.5 py-0.5 font-bold">
+                {allUnplaced.length}
+              </span>
+            </div>
+            <p className="text-[9px] text-orange-500 mt-0.5">항목을 도면으로 드래그하여 배치</p>
+          </div>
+          {/* 배치 대기 목록 */}
+          <div className="overflow-y-auto flex-1">
+            {allUnplaced.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-6 text-gray-300">
+                <span className="text-2xl mb-1">✅</span>
+                <p className="text-[10px]">모두 배치 완료</p>
+              </div>
+            ) : (
+              allUnplaced.map(fe => {
+                const isDragging = draggingPanelId === fe.id;
+                const color = STATUS_COLOR[fe.status] ?? '#6b7280';
+                return (
+                  <div
+                    key={fe.id}
+                    draggable
+                    onDragStart={e => onPanelDragStart(e, fe)}
+                    onDragEnd={onPanelDragEnd}
+                    className={[
+                      'flex items-center gap-2 px-3 py-2 border-b border-gray-50 cursor-grab active:cursor-grabbing select-none transition-all',
+                      isDragging ? 'opacity-40 bg-blue-50' : 'hover:bg-orange-50',
+                    ].join(' ')}
+                  >
+                    {/* 드래그 핸들 아이콘 */}
+                    <svg className="w-3 h-3 text-gray-300 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M7 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 2zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 14zm6-8a2 2 0 1 0-.001-4.001A2 2 0 0 0 13 6zm0 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 14z"/>
+                    </svg>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-bold text-gray-700 font-mono truncate">{fe.id}</p>
+                      <p className="text-[10px] text-gray-400 truncate">{fe.location}</p>
+                    </div>
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
 
-        {/* 배치된 소화기 */}
-        <div className="flex-1 overflow-y-auto">
-          {markers.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-10 text-gray-300">
-              <span className="text-3xl mb-2">🧯</span>
-              <p className="text-xs">배치된 소화기 없음</p>
+        {/* ② 배치된 소화기 섹션 */}
+        <div className="flex flex-col flex-1 min-h-0">
+          {/* 배치된 소화기 헤더 */}
+          <div className="px-3 py-2.5 bg-gray-50 border-b border-gray-100 flex-shrink-0">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold text-gray-700">🧯 배치된 소화기</p>
+              <span className="text-[10px] bg-blue-100 text-blue-700 rounded-full px-1.5 py-0.5 font-bold">
+                {markers.length}
+              </span>
             </div>
-          ) : (
-            <div className="py-1">
-              {markers.map((fe) => {
+            <p className="text-[9px] text-gray-400 mt-0.5">{floor.label} · 클릭하여 편집</p>
+          </div>
+          {/* 배치된 소화기 목록 */}
+          <div className="overflow-y-auto flex-1">
+            {markers.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-gray-300">
+                <span className="text-2xl mb-1">🗺️</span>
+                <p className="text-[10px]">배치된 소화기 없음</p>
+              </div>
+            ) : (
+              markers.map(fe => {
                 const color = STATUS_COLOR[fe.status] ?? '#6b7280';
                 const seqNo = allIdOrderMap[fe.id] ?? null;
                 const isHov = hoveredId === fe.id;
@@ -1022,7 +1178,6 @@ function FloorView({
                     ].join(' ')}
                   >
                     <div className="flex items-center gap-2">
-                      {/* NO. 배지 */}
                       {seqNo !== null && (
                         <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white text-[9px] font-black flex items-center justify-center">
                           {seqNo}
@@ -1032,55 +1187,18 @@ function FloorView({
                         <p className="text-[11px] font-bold text-gray-700 font-mono truncate">{fe.id}</p>
                         <p className="text-[10px] text-gray-400 truncate">{fe.location}</p>
                       </div>
-                      {/* 상태 점 */}
-                      <span
-                        className="flex-shrink-0 w-2 h-2 rounded-full"
-                        style={{ backgroundColor: color }}
-                      />
+                      <span className="flex-shrink-0 w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
                     </div>
                   </button>
                 );
-              })}
-            </div>
-          )}
-
-          {/* 미배치 소화기 (편집 모드에서만 표시) */}
-          {editMode && unplaced.length > 0 && (
-            <>
-              <div className="px-3 py-2 bg-orange-50 border-y border-orange-100">
-                <p className="text-[10px] font-bold text-orange-600">미배치 소화기 ({unplaced.length}개)</p>
-                <p className="text-[9px] text-orange-400">클릭 후 도면에서 위치 지정</p>
-              </div>
-              {unplaced.map((fe) => (
-                <button
-                  key={fe.id}
-                  onClick={() => {
-                    setSelectedFe(fe);
-                    setPendingPos(null);
-                  }}
-                  className={[
-                    'w-full text-left px-3 py-2 border-b border-gray-50 transition-colors',
-                    selectedFe?.id === fe.id
-                      ? 'bg-orange-50 border-l-2 border-l-orange-400'
-                      : 'hover:bg-orange-50',
-                  ].join(' ')}
-                >
-                  <p className="text-[11px] font-bold text-orange-700 font-mono">{fe.id}</p>
-                  <p className="text-[10px] text-gray-400 truncate">{fe.location}</p>
-                </button>
-              ))}
-            </>
-          )}
+              })
+            )}
+          </div>
         </div>
 
         {/* 하단 안내 */}
-        <div className="px-3 py-2.5 border-t border-gray-100 bg-gray-50">
-          <div className="flex items-center gap-1.5 text-[10px] text-gray-400">
-            <svg className="w-3 h-3 text-green-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm-1 14l-4-4 1.414-1.414L11 13.172l6.586-6.586L19 8l-8 8z"/>
-            </svg>
-            자동 저장 (localStorage)
-          </div>
+        <div className="px-3 py-2 border-t border-gray-100 bg-gray-50 flex-shrink-0">
+          <p className="text-[9px] text-gray-400">💾 자동 저장 (localStorage)</p>
         </div>
       </div>
 

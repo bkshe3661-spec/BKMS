@@ -75,6 +75,14 @@ export function getUnplacedExtinguishers(floor: string): Extinguisher[] {
   );
 }
 
+/**
+ * 좌표(mapX, mapY)가 없는 모든 미배치 소화기 반환
+ * (floor 키워드 무관 — 배치 대기 패널 전용)
+ */
+export function getAllUnplacedExtinguishers(): Extinguisher[] {
+  return loadAll().filter(e => e.mapX === undefined || e.mapY === undefined);
+}
+
 /** 단건 조회 */
 export function getExtinguisherById(id: string): Extinguisher | null {
   return loadAll().find(e => e.id === id) ?? null;
