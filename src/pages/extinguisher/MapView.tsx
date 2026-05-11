@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import type { BuildingPolygon, Point } from '../../types/polygon';
 import type { Extinguisher, ExtinguisherStatus } from '../../types/extinguisher';
 import {
@@ -45,7 +45,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 /* ─────────────────────────────────────────
-   층 정의 — 실제 이미지 + 필터 키워드
+   층 정의
 ───────────────────────────────────────── */
 interface FloorDef {
   id: string;
@@ -79,7 +79,6 @@ const BUILDING_FLOORS: Record<string, FloorDef[]> = {
 
 /* ─────────────────────────────────────────
    화질 선명 고정 스타일 (공통)
-   - pixelated + crisp-edges 이중 적용
    - will-change 절대 사용 금지
 ───────────────────────────────────────── */
 const SHARP_IMG_STYLE: React.CSSProperties = {
@@ -89,7 +88,6 @@ const SHARP_IMG_STYLE: React.CSSProperties = {
   backfaceVisibility: 'hidden' as React.CSSProperties['backfaceVisibility'],
   userSelect: 'none',
   pointerEvents: 'none',
-  /* will-change → 의도적으로 제거 (화질 뭉개짐 원인) */
 };
 
 /* ─────────────────────────────────────────
@@ -268,7 +266,7 @@ function EditModal({
 }
 
 /* ─────────────────────────────────────────
-   신규 소화기 추가 모달 ([+ 소화기 추가] 버튼용)
+   신규 소화기 추가 모달
 ───────────────────────────────────────── */
 interface NewExtinguisherForm {
   location: string;
@@ -309,7 +307,6 @@ function AddModal({
       alert('설치 위치를 입력하세요.');
       return;
     }
-    // ID 자동 생성: 순번 방식 (BK-FE-001, 002, ...)
     const newId = getNextExtinguisherId();
     const newFe: Extinguisher = {
       id: newId,
@@ -337,7 +334,6 @@ function AddModal({
         className="bg-white rounded-2xl shadow-2xl w-96 overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        {/* 헤더 */}
         <div className="flex items-center justify-between px-5 py-4 bg-blue-600">
           <div>
             <p className="text-xs text-blue-200">{floor.label} 도면 위치 지정 완료</p>
@@ -350,29 +346,25 @@ function AddModal({
           </button>
         </div>
 
-        {/* 좌표 미리보기 */}
         <div className="mx-5 mt-4 mb-1 px-3 py-2 bg-blue-50 rounded-lg border border-blue-200 flex items-center gap-2">
           <svg className="w-4 h-4 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
           </svg>
-          <span className="text-xs text-blue-700 font-mono">
-            X: {(pendingRatio.x * 100).toFixed(1)}% &nbsp;/&nbsp; Y: {(pendingRatio.y * 100).toFixed(1)}%
+          <span className="text-xs text-blue-700">
+            위치: ({(pendingRatio.x * 100).toFixed(1)}%, {(pendingRatio.y * 100).toFixed(1)}%)
           </span>
         </div>
 
-        {/* 입력 폼 */}
         <div className="px-5 py-3 space-y-3 max-h-80 overflow-y-auto">
           <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1">
-              설치 위치 <span className="text-red-500">*</span>
-            </label>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">설치 위치 <span className="text-red-400">*</span></label>
             <input
               value={form.location}
               onChange={e => set('location', e.target.value)}
-              placeholder="예: 관리동 1층 복도"
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+              placeholder="예: 관리동 1층 현관"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
               autoFocus
             />
           </div>
@@ -386,10 +378,8 @@ function AddModal({
               <option>ABC 분말 3.3kg</option>
               <option>ABC 분말 4.5kg</option>
               <option>하론 3kg</option>
+              <option>K급(4L) 7.5kg</option>
               <option>자동확산 3kg</option>
-              <option>K급 7.5L</option>
-              <option>CO2 5kg</option>
-              <option>기타</option>
             </select>
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -446,7 +436,6 @@ function AddModal({
           </div>
         </div>
 
-        {/* 저장 버튼 */}
         <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 flex gap-2">
           <button
             onClick={handleSave}
@@ -468,163 +457,20 @@ function AddModal({
 }
 
 /* ─────────────────────────────────────────
-   왼쪽 건물/층 선택 사이드바
-───────────────────────────────────────── */
-function BuildingFloorPanel({
-  selectedFloorId,
-  onSelect,
-}: {
-  selectedFloorId: string | null;
-  onSelect: (buildingName: string, floor: FloorDef) => void;
-}) {
-  const buildings = Object.entries(BUILDING_FLOORS);
-
-  /* 건물별 펼침 상태 — 기본 전체 펼침 */
-  const [expanded, setExpanded] = useState<Record<string, boolean>>(
-    () => Object.fromEntries(buildings.map(([name]) => [name, true]))
-  );
-
-  const toggleBuilding = (name: string) =>
-    setExpanded(prev => ({ ...prev, [name]: !prev[name] }));
-
-  return (
-    <div
-      className="flex-shrink-0 flex flex-col bg-white border-r border-gray-200"
-      style={{ width: 200 }}
-    >
-      {/* 패널 헤더 */}
-      <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-blue-600 flex items-center justify-center flex-shrink-0">
-            <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
-            </svg>
-          </div>
-          <div>
-            <p className="text-xs font-bold text-gray-800">건물 · 층 선택</p>
-            <p className="text-[10px] text-gray-400 leading-tight">층을 클릭해 도면 열기</p>
-          </div>
-        </div>
-      </div>
-
-      {/* 건물 목록 */}
-      <div className="flex-1 overflow-y-auto py-2">
-        {buildings.map(([buildingName, floors]) => {
-          const isOpen = expanded[buildingName] ?? true;
-          const hasActive = floors.some(f => f.id === selectedFloorId);
-
-          return (
-            <div key={buildingName} className="mb-1">
-              {/* 건물명 행 (클릭으로 펼침/접기) */}
-              <button
-                onClick={() => toggleBuilding(buildingName)}
-                className={[
-                  'w-full flex items-center gap-2 px-3 py-2.5 text-left transition-colors',
-                  hasActive ? 'bg-blue-50' : 'hover:bg-gray-50',
-                ].join(' ')}
-              >
-                {/* 건물 아이콘 */}
-                <div className={[
-                  'w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0',
-                  hasActive ? 'bg-blue-600' : 'bg-gray-100',
-                ].join(' ')}>
-                  <svg
-                    className={['w-4 h-4', hasActive ? 'text-white' : 'text-gray-500'].join(' ')}
-                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className={[
-                    'text-sm font-bold truncate',
-                    hasActive ? 'text-blue-700' : 'text-gray-800',
-                  ].join(' ')}>{buildingName}</p>
-                  <p className="text-[10px] text-gray-400">{floors.length}개 층</p>
-                </div>
-                {/* 펼침/접기 화살표 */}
-                <svg
-                  className={['w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-transform', isOpen ? 'rotate-90' : ''].join(' ')}
-                  fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/>
-                </svg>
-              </button>
-
-              {/* 층 목록 */}
-              {isOpen && (
-                <div className="ml-3 mr-2 mb-1 space-y-0.5">
-                  {floors.map(floor => {
-                    const isActive = floor.id === selectedFloorId;
-                    return (
-                      <button
-                        key={floor.id}
-                        onClick={() => onSelect(buildingName, floor)}
-                        className={[
-                          'w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left transition-all',
-                          isActive
-                            ? 'bg-blue-600 shadow-sm'
-                            : 'bg-gray-50 hover:bg-blue-50 border border-gray-100 hover:border-blue-200',
-                        ].join(' ')}
-                      >
-                        {/* 층 번호 배지 */}
-                        <div className={[
-                          'w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-xs font-black',
-                          isActive ? 'bg-white/20 text-white' : 'bg-white text-blue-600 border border-blue-200',
-                        ].join(' ')}>
-                          {floor.label.replace('층', '')}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className={[
-                            'text-xs font-semibold',
-                            isActive ? 'text-white' : 'text-gray-700',
-                          ].join(' ')}>{floor.label}</p>
-                          <p className={[
-                            'text-[10px] leading-tight',
-                            isActive ? 'text-blue-100' : 'text-gray-400',
-                          ].join(' ')}>도면 보기</p>
-                        </div>
-                        {isActive && (
-                          <svg className="w-3 h-3 text-white/80 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
-                          </svg>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* 하단 안내 */}
-      <div className="px-3 py-2.5 border-t border-gray-100 bg-gray-50">
-        <div className="flex items-center gap-1.5 text-[10px] text-gray-400">
-          <svg className="w-3 h-3 text-green-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm-1 14l-4-4 1.414-1.414L11 13.172l6.586-6.586L19 8l-8 8z"/>
-          </svg>
-          자동 저장 (localStorage)
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ─────────────────────────────────────────
-   내부 도면 뷰 (FloorView) — 1층·2층 공통
+   내부 도면 뷰 (FloorView)
+   - 상단 툴바: ← 뒤로가기 + 1층/2층 탭
+   - 오른쪽: 소화기 목록 사이드바
 ───────────────────────────────────────── */
 function FloorView({
+  building,
   floor,
-  buildingName,
-  onFloorSelect,
+  onBack,
+  onFloorChange,
 }: {
+  building: string;
   floor: FloorDef;
-  buildingName: string;
-  onFloorSelect: (buildingName: string, floor: FloorDef) => void;
+  onBack: () => void;
+  onFloorChange: (floor: FloorDef) => void;
 }) {
   const { imgW, imgH } = floor;
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -637,39 +483,38 @@ function FloorView({
   const [unplaced, setUnplaced] = useState<Extinguisher[]>(() => getUnplacedExtinguishers(floor.id));
   const [editMode, setEditMode] = useState(false);
 
-  /* 전체 소화기 ID 순서 맵 (NO. 열 동기화용) */
+  /* 전체 소화기 ID 순서 맵 (NO. 배지 동기화) */
   const [allIdOrderMap, setAllIdOrderMap] = useState<Record<string, number>>({});
-
   useEffect(() => {
     getAllExtinguishers().then(all => {
       const map: Record<string, number> = {};
       all.forEach((fe, idx) => { map[fe.id] = idx + 1; });
       setAllIdOrderMap(map);
     });
-  }, [markers]); // markers 변경 시 재계산
+  }, [markers]);
 
-  /* 기존 마커 위치지정 모드 (편집 모드에서 미배치 소화기 선택 후 클릭) */
-  const [selectedFe, setSelectedFe]     = useState<Extinguisher | null>(null);
-  const [pendingPos, setPendingPos]     = useState<{ x: number; y: number } | null>(null);
+  /* 기존 마커 위치지정 모드 */
+  const [selectedFe, setSelectedFe] = useState<Extinguisher | null>(null);
+  const [pendingPos, setPendingPos] = useState<{ x: number; y: number } | null>(null);
 
-  /* 신규 소화기 추가 모드 ([+ 소화기 추가] 버튼) */
+  /* 신규 소화기 추가 모드 */
   const [addMode,       setAddMode]       = useState(false);
   const [addPendingPos, setAddPendingPos] = useState<{ x: number; y: number } | null>(null);
 
-  /* 편집 모달 (기존 마커 클릭) */
+  /* 편집 모달 */
   const [editTarget, setEditTarget] = useState<Extinguisher | null>(null);
   const [hoveredId,  setHoveredId]  = useState<string | null>(null);
 
-  /* ── 드래그 이동 상태 ── */
+  /* 드래그 이동 */
   const draggingMarker   = useRef<{ id: string; startX: number; startY: number } | null>(null);
   const isDraggingMarker = useRef(false);
 
-  /* ── 뷰 패닝용 ── */
+  /* 뷰 패닝 */
   const pointerDown = useRef<{ x: number; y: number } | null>(null);
   const didDrag     = useRef(false);
   const panOrigin   = useRef<{ mx: number; my: number; ox: number; oy: number } | null>(null);
 
-  /* ── img 기준 비율 좌표 ── */
+  /* img 기준 비율 좌표 */
   const clientToRatio = useCallback((cx: number, cy: number) => {
     const img = imgRef.current;
     if (!img) return null;
@@ -680,7 +525,7 @@ function FloorView({
     return { x, y };
   }, []);
 
-  /* ── 마커 드래그 시작 ── */
+  /* 마커 드래그 시작 */
   const onMarkerMouseDown = useCallback((e: React.MouseEvent, fe: Extinguisher) => {
     if (!editMode) return;
     e.stopPropagation();
@@ -689,7 +534,6 @@ function FloorView({
     isDraggingMarker.current = false;
   }, [editMode]);
 
-  /* ── 캔버스 MouseDown ── */
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
     if (draggingMarker.current) return;
@@ -698,7 +542,6 @@ function FloorView({
     panOrigin.current   = { mx: e.clientX, my: e.clientY, ox: offset.x, oy: offset.y };
   }, [offset]);
 
-  /* ── 캔버스 MouseMove ── */
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (draggingMarker.current) {
       const dx = e.clientX - draggingMarker.current.startX;
@@ -717,11 +560,9 @@ function FloorView({
     }
   }, [scale, clampOffset]);
 
-  /* ── 캔버스 MouseUp ── */
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
 
-    // 마커 드래그 완료 → 새 좌표 저장
     if (draggingMarker.current) {
       if (isDraggingMarker.current) {
         const pt = clientToRatio(e.clientX, e.clientY);
@@ -729,9 +570,7 @@ function FloorView({
           const { id } = draggingMarker.current;
           saveExtinguisherPosition(id, floor.id, pt.x, pt.y);
           const updated = getExtinguisherById(id);
-          if (updated) {
-            setMarkers(prev => prev.map(m => m.id === id ? updated : m));
-          }
+          if (updated) setMarkers(prev => prev.map(m => m.id === id ? updated : m));
         }
       }
       draggingMarker.current   = null;
@@ -745,21 +584,19 @@ function FloorView({
     panOrigin.current   = null;
     if (wasDrag) return;
 
-    // [+ 소화기 추가] 배치 모드 → 클릭 위치 저장 후 정보입력 모달
     if (addMode) {
       const pt = clientToRatio(e.clientX, e.clientY);
       if (pt) setAddPendingPos(pt);
       return;
     }
 
-    // 편집 모드 + 기존 소화기 선택됨 → 위치 임시 지정
     if (editMode && selectedFe) {
       const pt = clientToRatio(e.clientX, e.clientY);
       if (pt) setPendingPos(pt);
     }
   }, [addMode, editMode, selectedFe, clientToRatio, floor.id]);
 
-  /* ── 기존 미배치 소화기 위치 확정 ── */
+  /* 기존 미배치 소화기 위치 확정 */
   const confirmPlace = useCallback(() => {
     if (!selectedFe || !pendingPos) return;
     saveExtinguisherPosition(selectedFe.id, floor.id, pendingPos.x, pendingPos.y);
@@ -772,7 +609,7 @@ function FloorView({
     setSelectedFe(null);
   }, [selectedFe, pendingPos, floor.id]);
 
-  /* ── 신규 소화기 추가 저장 ── */
+  /* 신규 소화기 저장 */
   const handleAddSave = useCallback((fe: Extinguisher) => {
     addNewExtinguisher(fe);
     setMarkers(prev => [...prev, fe]);
@@ -780,7 +617,7 @@ function FloorView({
     setAddMode(false);
   }, []);
 
-  /* ── 마커 클릭 → 편집 모달 (일반 모드) ── */
+  /* 마커 클릭 → 편집 모달 */
   const onMarkerClick = useCallback((e: React.MouseEvent, fe: Extinguisher) => {
     e.stopPropagation();
     if (isDraggingMarker.current) return;
@@ -789,14 +626,14 @@ function FloorView({
     setEditTarget(fe);
   }, [editMode, addMode]);
 
-  /* ── 편집 저장 ── */
+  /* 편집 저장 */
   const handleSave = useCallback((updated: Extinguisher) => {
     updateExtinguisherInfo(updated);
     setMarkers(prev => prev.map(m => m.id === updated.id ? updated : m));
     setEditTarget(null);
   }, []);
 
-  /* ── 도면에서 제거 ── */
+  /* 도면에서 제거 */
   const handleRemoveFromMap = useCallback(() => {
     if (!editTarget) return;
     removeExtinguisherPosition(editTarget.id);
@@ -806,7 +643,7 @@ function FloorView({
     setEditTarget(null);
   }, [editTarget]);
 
-  /* ── ESC ── */
+  /* ESC */
   useEffect(() => {
     const fn = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -837,322 +674,410 @@ function FloorView({
     ? 'crosshair'
     : (editMode && selectedFe ? 'crosshair' : 'grab');
 
-  /* ── 이미지 style: 화질 선명 최우선 ── */
   const floorImgStyle: React.CSSProperties = {
     ...SHARP_IMG_STYLE,
     width: imgW,
     height: imgH,
-    /* crisp-edges는 pixelated 폴백 — 두 속성 모두 inline으로 적용 */
   };
 
+  const floors = BUILDING_FLOORS[building] ?? [];
+
   return (
-    <div className="flex flex-col flex-1 min-w-0" style={{ height: '100%' }}>
+    <div className="flex flex-1 min-w-0 overflow-hidden" style={{ height: '100%' }}>
 
-      {/* ── 툴바 ── */}
-      <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200 shadow-sm flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
-          </svg>
-          <span className="text-sm font-semibold text-gray-700">{buildingName}</span>
-          <span className="px-2 py-0.5 bg-blue-600 text-white text-xs rounded-full font-bold">{floor.label}</span>
-          <span className="text-[11px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
-            소화기 {markers.length}개 배치됨
-          </span>
-        </div>
+      {/* ── 도면 영역 (왼쪽) ── */}
+      <div className="flex flex-col flex-1 min-w-0">
 
-        <div className="flex items-center gap-2">
-          {/* 줌 컨트롤 */}
-          <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg px-2 py-1">
+        {/* ── 툴바 ── */}
+        <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200 shadow-sm flex-shrink-0">
+          <div className="flex items-center gap-3">
+
+            {/* ← 뒤로가기 */}
             <button
-              onClick={() => setScale(s => { const n = Math.min(MAX_SCALE, s * 1.25); setOffset(o => clampOffset(o.x, o.y, n)); return n; })}
-              className="w-7 h-7 flex items-center justify-center text-gray-600 hover:text-blue-600 font-bold text-lg"
-            >+</button>
-            <span className="text-xs text-gray-500 w-14 text-center tabular-nums">{Math.round(scale * 100)}%</span>
-            <button
-              onClick={() => setScale(s => { const n = Math.max(containScale, s * 0.8); setOffset(o => clampOffset(o.x, o.y, n)); return n; })}
-              className="w-7 h-7 flex items-center justify-center text-gray-600 hover:text-blue-600 font-bold text-lg"
-            >−</button>
-            <button onClick={resetView} className="ml-1 text-gray-400 hover:text-blue-600 px-1" title="전체 보기">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
+              onClick={onBack}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-semibold text-gray-600 hover:bg-gray-100 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7"/>
               </svg>
+              조감도
             </button>
+
+            <span className="text-gray-300">|</span>
+
+            {/* 건물명 */}
+            <div className="flex items-center gap-1.5">
+              <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+              </svg>
+              <span className="text-sm font-semibold text-gray-700">{building}</span>
+            </div>
+
+            {/* 1층 / 2층 탭 */}
+            <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
+              {floors.map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => onFloorChange(f)}
+                  className={[
+                    'px-3 py-1.5 rounded-md text-sm font-bold transition-all',
+                    f.id === floor.id
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-gray-500 hover:text-gray-800',
+                  ].join(' ')}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
+            {/* 배치된 소화기 수 */}
+            <span className="text-[11px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
+              소화기 {markers.length}개 배치됨
+            </span>
           </div>
 
-          {/* [+ 소화기 추가] 버튼 */}
-          <button
-            onClick={() => {
-              setAddMode(p => {
-                const next = !p;
-                if (next) {
-                  setEditMode(false);
-                  setSelectedFe(null);
-                  setPendingPos(null);
-                } else {
-                  setAddPendingPos(null);
-                }
-                return next;
-              });
-            }}
-            className={[
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all',
-              addMode
-                ? 'bg-blue-700 text-white ring-2 ring-blue-300'
-                : 'bg-blue-600 text-white hover:bg-blue-700',
-            ].join(' ')}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4"/>
-            </svg>
-            {addMode ? '도면 클릭 → 위치 지정 (ESC 취소)' : '소화기 추가'}
-          </button>
+          <div className="flex items-center gap-2">
+            {/* 줌 컨트롤 */}
+            <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg px-2 py-1">
+              <button
+                onClick={() => setScale(s => { const n = Math.min(MAX_SCALE, s * 1.25); setOffset(o => clampOffset(o.x, o.y, n)); return n; })}
+                className="w-7 h-7 flex items-center justify-center text-gray-600 hover:text-blue-600 font-bold text-lg"
+              >+</button>
+              <span className="text-xs text-gray-500 w-14 text-center tabular-nums">{Math.round(scale * 100)}%</span>
+              <button
+                onClick={() => setScale(s => { const n = Math.max(containScale, s * 0.8); setOffset(o => clampOffset(o.x, o.y, n)); return n; })}
+                className="w-7 h-7 flex items-center justify-center text-gray-600 hover:text-blue-600 font-bold text-lg"
+              >−</button>
+              <button onClick={resetView} className="ml-1 text-gray-400 hover:text-blue-600 px-1" title="전체 보기">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
+                </svg>
+              </button>
+            </div>
 
-          {/* 편집 토글 */}
-          <button
-            onClick={() => {
-              setEditMode(p => {
-                const next = !p;
-                if (next) {
-                  setAddMode(false);
-                  setAddPendingPos(null);
-                } else {
-                  setSelectedFe(null);
-                  setPendingPos(null);
-                }
-                return next;
-              });
-            }}
-            className={[
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all',
-              editMode
-                ? 'bg-orange-500 text-white ring-2 ring-orange-300'
-                : 'bg-emerald-600 text-white hover:bg-emerald-700',
-            ].join(' ')}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            {/* + 소화기 추가 */}
+            <button
+              onClick={() => {
+                setAddMode(p => {
+                  const next = !p;
+                  if (next) { setEditMode(false); setSelectedFe(null); setPendingPos(null); }
+                  else { setAddPendingPos(null); }
+                  return next;
+                });
+              }}
+              className={[
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all',
+                addMode
+                  ? 'bg-blue-700 text-white ring-2 ring-blue-300'
+                  : 'bg-blue-600 text-white hover:bg-blue-700',
+              ].join(' ')}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4"/>
+              </svg>
+              {addMode ? '도면 클릭 → 위치 지정' : '+ 소화기 추가'}
+            </button>
+
+            {/* 위치 편집 */}
+            <button
+              onClick={() => {
+                setEditMode(p => {
+                  const next = !p;
+                  if (next) { setAddMode(false); setAddPendingPos(null); }
+                  else { setSelectedFe(null); setPendingPos(null); }
+                  return next;
+                });
+              }}
+              className={[
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all',
+                editMode
+                  ? 'bg-orange-500 text-white ring-2 ring-orange-300'
+                  : 'bg-emerald-600 text-white hover:bg-emerald-700',
+              ].join(' ')}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+              </svg>
+              {editMode ? '편집 중… (ESC)' : '위치 편집'}
+            </button>
+          </div>
+        </div>
+
+        {/* 안내 배너 */}
+        {(addMode || editMode) && (
+          <div className={[
+            'flex items-center gap-2 px-4 py-1.5 border-b text-xs flex-shrink-0',
+            addMode
+              ? 'bg-blue-50 border-blue-200 text-blue-700'
+              : 'bg-orange-50 border-orange-200 text-orange-700',
+          ].join(' ')}>
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
             </svg>
-            {editMode ? '편집 중… (ESC 취소)' : '위치 편집'}
-          </button>
-        </div>
-      </div>
-
-      {/* ── 안내 배너 ── */}
-      {(addMode || editMode) && (
-        <div className={[
-          'flex items-center gap-2 px-4 py-1.5 border-b text-xs flex-shrink-0',
-          addMode
-            ? 'bg-blue-50 border-blue-200 text-blue-700'
-            : 'bg-orange-50 border-orange-200 text-orange-700',
-        ].join(' ')}>
-          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-          </svg>
-          {addMode
-            ? <span>📍 도면의 원하는 위치를 <strong>클릭</strong>하면 소화기를 추가할 수 있습니다 · ESC로 취소</span>
-            : selectedFe
-              ? <span><strong className="text-blue-700">{selectedFe.id}</strong> 선택됨 – 도면 클릭으로 위치 지정 · 배치된 마커를 드래그해 이동</span>
-              : <span>오른쪽 목록에서 소화기 선택 후 도면 클릭 배치 · 배치된 마커 드래그로 이동</span>
-          }
-        </div>
-      )}
-
-      {/* ── 도면 뷰포트 ── */}
-      <div
-        ref={canvasRef}
-        className="flex-1 overflow-hidden flex items-center justify-center bg-gray-100 select-none relative"
-        style={{ cursor }}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={() => {
-          if (draggingMarker.current) {
-            draggingMarker.current   = null;
-            isDraggingMarker.current = false;
-          }
-          pointerDown.current = null;
-          didDrag.current     = false;
-          panOrigin.current   = null;
-        }}
-        onWheel={handleWheel}
-      >
-        <div
-          style={{
-            width: imgW,
-            height: imgH,
-            flexShrink: 0,
-            position: 'relative',
-            transformOrigin: '50% 50%',
-            transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-            /* will-change 제거 — 화질 뭉개짐 방지 */
-          }}
-        >
-          {/* ── 도면 이미지: 화질 선명 최우선 ── */}
-          <img
-            ref={imgRef}
-            src={floor.img}
-            alt={`${buildingName} ${floor.label} 도면`}
-            draggable={false}
-            width={imgW}
-            height={imgH}
-            style={floorImgStyle}
-          />
-
-          {/* SVG 마커 오버레이 */}
-          <svg
-            style={{
-              position: 'absolute', top: 0, left: 0,
-              width: imgW, height: imgH,
-              overflow: 'visible',
-              pointerEvents: 'none',
-            }}
-          >
-            {/* 배치된 소화기 마커 */}
-            {markers.map((fe) => {
-              const mx    = (fe.mapX ?? 0) * imgW;
-              const my    = (fe.mapY ?? 0) * imgH;
-              const color = STATUS_COLOR[fe.status] ?? '#6b7280';
-              const isHov = hoveredId === fe.id;
-              /* NO. 열과 동기화된 순번 */
-              const seqNo = allIdOrderMap[fe.id] ?? null;
-
-              return (
-                <g
-                  key={fe.id}
-                  style={{ cursor: editMode ? 'grab' : 'pointer', pointerEvents: 'auto' }}
-                  onMouseEnter={() => setHoveredId(fe.id)}
-                  onMouseLeave={() => setHoveredId(null)}
-                  onMouseDown={e => onMarkerMouseDown(e, fe)}
-                  onMouseUp={e => {
-                    if (!isDraggingMarker.current) onMarkerClick(e as unknown as React.MouseEvent, fe);
-                  }}
-                >
-                  {/* 호버 시 외곽 링 */}
-                  {isHov && (
-                    <circle cx={mx} cy={my} r={20}
-                      fill={color} fillOpacity={0.15}
-                      stroke={color} strokeWidth={1.5} strokeDasharray="3 2"
-                      style={{ pointerEvents: 'none' }}/>
-                  )}
-
-                  {/* 메인 마커 원 */}
-                  <circle
-                    cx={mx} cy={my}
-                    r={isHov ? 15 : 12}
-                    fill={color}
-                    fillOpacity={0.92}
-                    stroke="white"
-                    strokeWidth={2.5}
-                    style={{
-                      transition: 'r .1s',
-                      filter: isHov ? `drop-shadow(0 2px 6px ${color}99)` : 'none',
-                    }}
-                  />
-
-                  {/* 소화기 이모지 */}
-                  <text x={mx} y={my + 5} textAnchor="middle" fontSize={11}
-                    style={{ pointerEvents: 'none', userSelect: 'none' }}>🧯</text>
-
-                  {/* ── 일련번호 배지 (마커 우측 상단) ── */}
-                  {seqNo !== null && (
-                    <g style={{ pointerEvents: 'none' }}>
-                      <circle
-                        cx={mx + 10} cy={my - 10}
-                        r={7}
-                        fill="#1d4ed8"
-                        stroke="white"
-                        strokeWidth={1.5}
-                      />
-                      <text
-                        x={mx + 10} y={my - 6}
-                        textAnchor="middle"
-                        fontSize={7}
-                        fontWeight="800"
-                        fill="white"
-                        fontFamily="-apple-system,'Malgun Gothic',sans-serif"
-                        style={{ userSelect: 'none' }}
-                      >
-                        {seqNo}
-                      </text>
-                    </g>
-                  )}
-
-                  {/* 호버 툴팁 */}
-                  {isHov && (
-                    <g style={{ pointerEvents: 'none' }}>
-                      <rect x={mx - 46} y={my - 40} width={92} height={24} rx={6}
-                        fill="rgba(15,15,30,0.85)"/>
-                      <text x={mx} y={my - 23} textAnchor="middle"
-                        fontSize={9.5} fill="white" fontWeight="700"
-                        fontFamily="-apple-system,'Malgun Gothic',sans-serif">
-                        {fe.id}
-                      </text>
-                      <text x={mx} y={my - 11} textAnchor="middle"
-                        fontSize={8.5} fill={color} fontWeight="600"
-                        fontFamily="-apple-system,'Malgun Gothic',sans-serif">
-                        {STATUS_LABEL[fe.status] ?? fe.status}
-                      </text>
-                    </g>
-                  )}
-                </g>
-              );
-            })}
-
-            {/* 기존 소화기 임시 배치 마커 (편집 모드) */}
-            {pendingPos && (
-              <g style={{ pointerEvents: 'none' }}>
-                <circle
-                  cx={pendingPos.x * imgW} cy={pendingPos.y * imgH}
-                  r={14} fill="#3b82f6" fillOpacity={0.85}
-                  stroke="white" strokeWidth={2.5} strokeDasharray="4 2"/>
-                <text x={pendingPos.x * imgW} y={pendingPos.y * imgH + 5}
-                  textAnchor="middle" fontSize={13}
-                  style={{ userSelect: 'none' }}>📍</text>
-              </g>
-            )}
-          </svg>
-        </div>
-
-        {/* 기존 소화기 위치 확인 팝업 (편집 모드) */}
-        {pendingPos && selectedFe && (
-          <div
-            className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-white rounded-2xl shadow-2xl px-5 py-4 z-30 flex items-center gap-4"
-            style={{ border: '2px solid #3b82f6' }}
-          >
-            <div>
-              <p className="text-sm font-bold text-gray-800">{selectedFe.id}</p>
-              <p className="text-xs text-gray-500 mt-0.5">이 위치에 저장하시겠습니까?</p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={confirmPlace}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-colors"
-              >✔ 저장</button>
-              <button
-                onClick={() => setPendingPos(null)}
-                className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl text-sm transition-colors"
-              >취소</button>
-            </div>
+            {addMode
+              ? <span>📍 도면의 원하는 위치를 <strong>클릭</strong>하면 소화기를 추가할 수 있습니다 · ESC로 취소</span>
+              : selectedFe
+                ? <span><strong className="text-blue-700">{selectedFe.id}</strong> 선택됨 – 도면 클릭으로 위치 지정 · 배치된 마커를 드래그해 이동</span>
+                : <span>오른쪽 목록에서 소화기 선택 후 도면 클릭 배치 · 배치된 마커 드래그로 이동</span>
+            }
           </div>
         )}
 
-        {/* 줌 레벨 표시 */}
-        <div className="absolute top-3 left-3 text-gray-600 text-xs font-mono rounded px-2 py-1 pointer-events-none"
-          style={{ background: 'rgba(255,255,255,0.75)', zIndex: 20 }}>
-          ×{scale.toFixed(2)}
-        </div>
-        <div className="absolute bottom-4 left-4 text-gray-500 text-xs rounded-lg px-2.5 py-1.5 pointer-events-none"
-          style={{ background: 'rgba(255,255,255,0.72)', zIndex: 20 }}>
-          🖱 휠: 줌 · 드래그: 이동{editMode ? ' · 마커 드래그: 위치 이동' : ''}
+        {/* 도면 뷰포트 */}
+        <div
+          ref={canvasRef}
+          className="flex-1 overflow-hidden flex items-center justify-center bg-gray-100 select-none relative"
+          style={{ cursor }}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={() => {
+            if (draggingMarker.current) {
+              draggingMarker.current   = null;
+              isDraggingMarker.current = false;
+            }
+            pointerDown.current = null;
+            didDrag.current     = false;
+            panOrigin.current   = null;
+          }}
+          onWheel={handleWheel}
+        >
+          <div
+            style={{
+              width: imgW,
+              height: imgH,
+              flexShrink: 0,
+              position: 'relative',
+              transformOrigin: '50% 50%',
+              transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
+            }}
+          >
+            <img
+              ref={imgRef}
+              src={floor.img}
+              alt={`${building} ${floor.label} 도면`}
+              draggable={false}
+              width={imgW}
+              height={imgH}
+              style={floorImgStyle}
+            />
+
+            {/* SVG 마커 오버레이 */}
+            <svg
+              style={{
+                position: 'absolute', top: 0, left: 0,
+                width: imgW, height: imgH,
+                overflow: 'visible',
+                pointerEvents: 'none',
+              }}
+            >
+              {markers.map((fe) => {
+                const mx    = (fe.mapX ?? 0) * imgW;
+                const my    = (fe.mapY ?? 0) * imgH;
+                const color = STATUS_COLOR[fe.status] ?? '#6b7280';
+                const isHov = hoveredId === fe.id;
+                const seqNo = allIdOrderMap[fe.id] ?? null;
+
+                return (
+                  <g
+                    key={fe.id}
+                    style={{ cursor: editMode ? 'grab' : 'pointer', pointerEvents: 'auto' }}
+                    onMouseEnter={() => setHoveredId(fe.id)}
+                    onMouseLeave={() => setHoveredId(null)}
+                    onMouseDown={e => onMarkerMouseDown(e, fe)}
+                    onMouseUp={e => {
+                      if (!isDraggingMarker.current) onMarkerClick(e as unknown as React.MouseEvent, fe);
+                    }}
+                  >
+                    {isHov && (
+                      <circle cx={mx} cy={my} r={20}
+                        fill={color} fillOpacity={0.15}
+                        stroke={color} strokeWidth={1.5} strokeDasharray="3 2"
+                        style={{ pointerEvents: 'none' }}/>
+                    )}
+                    <circle
+                      cx={mx} cy={my}
+                      r={isHov ? 15 : 12}
+                      fill={color}
+                      fillOpacity={0.92}
+                      stroke="white"
+                      strokeWidth={2.5}
+                      style={{ transition: 'r .1s', filter: isHov ? `drop-shadow(0 2px 6px ${color}99)` : 'none' }}
+                    />
+                    <text x={mx} y={my + 5} textAnchor="middle" fontSize={11}
+                      style={{ pointerEvents: 'none', userSelect: 'none' }}>🧯</text>
+
+                    {/* 일련번호 배지 */}
+                    {seqNo !== null && (
+                      <g style={{ pointerEvents: 'none' }}>
+                        <circle cx={mx + 10} cy={my - 10} r={7} fill="#1d4ed8" stroke="white" strokeWidth={1.5}/>
+                        <text x={mx + 10} y={my - 6} textAnchor="middle" fontSize={7} fontWeight="800" fill="white"
+                          fontFamily="-apple-system,'Malgun Gothic',sans-serif" style={{ userSelect: 'none' }}>
+                          {seqNo}
+                        </text>
+                      </g>
+                    )}
+
+                    {/* 호버 툴팁 */}
+                    {isHov && (
+                      <g style={{ pointerEvents: 'none' }}>
+                        <rect x={mx - 46} y={my - 40} width={92} height={24} rx={6} fill="rgba(15,15,30,0.85)"/>
+                        <text x={mx} y={my - 23} textAnchor="middle" fontSize={9.5} fill="white" fontWeight="700"
+                          fontFamily="-apple-system,'Malgun Gothic',sans-serif">{fe.id}</text>
+                        <text x={mx} y={my - 11} textAnchor="middle" fontSize={8.5} fill={color} fontWeight="600"
+                          fontFamily="-apple-system,'Malgun Gothic',sans-serif">{STATUS_LABEL[fe.status] ?? fe.status}</text>
+                      </g>
+                    )}
+                  </g>
+                );
+              })}
+
+              {/* 기존 소화기 임시 배치 마커 */}
+              {pendingPos && (
+                <g style={{ pointerEvents: 'none' }}>
+                  <circle cx={pendingPos.x * imgW} cy={pendingPos.y * imgH}
+                    r={14} fill="#3b82f6" fillOpacity={0.85}
+                    stroke="white" strokeWidth={2.5} strokeDasharray="4 2"/>
+                  <text x={pendingPos.x * imgW} y={pendingPos.y * imgH + 5}
+                    textAnchor="middle" fontSize={13} style={{ userSelect: 'none' }}>📍</text>
+                </g>
+              )}
+            </svg>
+          </div>
+
+          {/* 위치 확인 팝업 */}
+          {pendingPos && selectedFe && (
+            <div
+              className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-white rounded-2xl shadow-2xl px-5 py-4 z-30 flex items-center gap-4"
+              style={{ border: '2px solid #3b82f6' }}
+            >
+              <div>
+                <p className="text-sm font-bold text-gray-800">{selectedFe.id}</p>
+                <p className="text-xs text-gray-500 mt-0.5">이 위치에 저장하시겠습니까?</p>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={confirmPlace}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-colors">✔ 저장</button>
+                <button onClick={() => setPendingPos(null)}
+                  className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl text-sm transition-colors">취소</button>
+              </div>
+            </div>
+          )}
+
+          {/* 줌 레벨 표시 */}
+          <div className="absolute top-3 left-3 text-gray-600 text-xs font-mono rounded px-2 py-1 pointer-events-none"
+            style={{ background: 'rgba(255,255,255,0.75)', zIndex: 20 }}>
+            ×{scale.toFixed(2)}
+          </div>
+          <div className="absolute bottom-4 left-4 text-gray-500 text-xs rounded-lg px-2.5 py-1.5 pointer-events-none"
+            style={{ background: 'rgba(255,255,255,0.72)', zIndex: 20 }}>
+            🖱 휠: 줌 · 드래그: 이동{editMode ? ' · 마커 드래그: 위치 이동' : ''}
+          </div>
         </div>
       </div>
 
-      {/* 기존 소화기 편집 모달 */}
+      {/* ── 오른쪽 소화기 목록 사이드바 ── */}
+      <div className="flex-shrink-0 flex flex-col bg-white border-l border-gray-200" style={{ width: 220 }}>
+
+        {/* 사이드바 헤더 */}
+        <div className="px-3 py-3 border-b border-gray-100 bg-gray-50">
+          <p className="text-xs font-bold text-gray-700">🧯 소화기 목록</p>
+          <p className="text-[10px] text-gray-400 mt-0.5">{floor.label} · {markers.length}개 배치</p>
+        </div>
+
+        {/* 배치된 소화기 */}
+        <div className="flex-1 overflow-y-auto">
+          {markers.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 text-gray-300">
+              <span className="text-3xl mb-2">🧯</span>
+              <p className="text-xs">배치된 소화기 없음</p>
+            </div>
+          ) : (
+            <div className="py-1">
+              {markers.map((fe) => {
+                const color = STATUS_COLOR[fe.status] ?? '#6b7280';
+                const seqNo = allIdOrderMap[fe.id] ?? null;
+                const isHov = hoveredId === fe.id;
+                return (
+                  <button
+                    key={fe.id}
+                    onMouseEnter={() => setHoveredId(fe.id)}
+                    onMouseLeave={() => setHoveredId(null)}
+                    onClick={() => !editMode && setEditTarget(fe)}
+                    className={[
+                      'w-full text-left px-3 py-2 border-b border-gray-50 transition-colors',
+                      isHov ? 'bg-blue-50' : 'hover:bg-gray-50',
+                    ].join(' ')}
+                  >
+                    <div className="flex items-center gap-2">
+                      {/* NO. 배지 */}
+                      {seqNo !== null && (
+                        <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white text-[9px] font-black flex items-center justify-center">
+                          {seqNo}
+                        </span>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[11px] font-bold text-gray-700 font-mono truncate">{fe.id}</p>
+                        <p className="text-[10px] text-gray-400 truncate">{fe.location}</p>
+                      </div>
+                      {/* 상태 점 */}
+                      <span
+                        className="flex-shrink-0 w-2 h-2 rounded-full"
+                        style={{ backgroundColor: color }}
+                      />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* 미배치 소화기 (편집 모드에서만 표시) */}
+          {editMode && unplaced.length > 0 && (
+            <>
+              <div className="px-3 py-2 bg-orange-50 border-y border-orange-100">
+                <p className="text-[10px] font-bold text-orange-600">미배치 소화기 ({unplaced.length}개)</p>
+                <p className="text-[9px] text-orange-400">클릭 후 도면에서 위치 지정</p>
+              </div>
+              {unplaced.map((fe) => (
+                <button
+                  key={fe.id}
+                  onClick={() => {
+                    setSelectedFe(fe);
+                    setPendingPos(null);
+                  }}
+                  className={[
+                    'w-full text-left px-3 py-2 border-b border-gray-50 transition-colors',
+                    selectedFe?.id === fe.id
+                      ? 'bg-orange-50 border-l-2 border-l-orange-400'
+                      : 'hover:bg-orange-50',
+                  ].join(' ')}
+                >
+                  <p className="text-[11px] font-bold text-orange-700 font-mono">{fe.id}</p>
+                  <p className="text-[10px] text-gray-400 truncate">{fe.location}</p>
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+
+        {/* 하단 안내 */}
+        <div className="px-3 py-2.5 border-t border-gray-100 bg-gray-50">
+          <div className="flex items-center gap-1.5 text-[10px] text-gray-400">
+            <svg className="w-3 h-3 text-green-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm-1 14l-4-4 1.414-1.414L11 13.172l6.586-6.586L19 8l-8 8z"/>
+            </svg>
+            자동 저장 (localStorage)
+          </div>
+        </div>
+      </div>
+
+      {/* 편집 모달 */}
       {editTarget && (
         <EditModal
           item={editTarget}
@@ -1171,9 +1096,6 @@ function FloorView({
           onClose={() => setAddPendingPos(null)}
         />
       )}
-
-      {/* (내부용 — 층 전환 콜백 전달, 실제로는 사이드바에서 처리) */}
-      <div style={{ display: 'none' }} data-floor-select={JSON.stringify({ buildingName, onFloorSelect })} />
     </div>
   );
 }
@@ -1322,7 +1244,6 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
   const nearFirst = draft.length >= 3 && cursorPt !== null
     && imgDist(cursorPt, draft[0], AERIAL_W, AERIAL_H) < CLOSE_THRESHOLD;
 
-  /* 조감도 이미지 style */
   const aerialImgStyle: React.CSSProperties = {
     ...SHARP_IMG_STYLE,
     width: AERIAL_W,
@@ -1337,7 +1258,7 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
           <span className="text-sm font-semibold text-gray-700">🗺 공장 조감도</span>
           <span className="text-xs text-gray-400">· 태경BK 단양1공장</span>
           <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full border border-blue-200">
-            💡 왼쪽 패널에서 층 선택 또는 건물 클릭
+            💡 건물 클릭 → 도면 보기
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -1407,7 +1328,6 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
           flexShrink: 0, position: 'relative',
           transformOrigin: '50% 50%',
           transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-          /* will-change 제거 */
         }}>
           <img
             ref={imgRef}
@@ -1425,11 +1345,11 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
             pointerEvents: drawMode ? 'none' : 'auto',
           }}>
             {polygons.map(poly => {
-              const isHov     = hoveredId === poly.id || selectedId === poly.id;
-              const isSel     = selectedId === poly.id;
+              const isHov      = hoveredId === poly.id || selectedId === poly.id;
+              const isSel      = selectedId === poly.id;
               const { cx, cy } = centroid(poly.points, AERIAL_W, AERIAL_H);
-              const lw        = Math.min(Math.max(poly.name.length * 8 + 20, 64), 160);
-              const hasFloors = !!BUILDING_FLOORS[poly.name];
+              const lw         = Math.min(Math.max(poly.name.length * 8 + 20, 64), 160);
+              const hasFloors  = !!BUILDING_FLOORS[poly.name];
               return (
                 <g key={poly.id} style={{ cursor: 'pointer' }}
                   onMouseEnter={() => setHoveredId(poly.id)}
@@ -1523,56 +1443,46 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
 }
 
 /* ─────────────────────────────────────────
-   메인 MapView — 레이아웃 총괄
-   [BuildingFloorPanel | AerialView or FloorView]
+   메인 MapView
+   조감도 → 건물 클릭 → 도면 뷰 (1층/2층 탭 + 뒤로가기)
 ───────────────────────────────────────── */
 export default function MapView() {
   const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null);
   const [selectedFloor,    setSelectedFloor]    = useState<FloorDef | null>(null);
 
-  /* 건물/층 선택 패널에서 선택 시 */
-  const handleFloorSelect = useCallback((buildingName: string, floor: FloorDef) => {
-    setSelectedBuilding(buildingName);
+  /* 건물 클릭 → 첫 번째 층으로 진입 */
+  const handleBuildingSelect = useCallback((buildingName: string) => {
+    const floors = BUILDING_FLOORS[buildingName];
+    if (floors && floors.length > 0) {
+      setSelectedBuilding(buildingName);
+      setSelectedFloor(floors[0]);
+    }
+  }, []);
+
+  /* 층 탭 전환 */
+  const handleFloorChange = useCallback((floor: FloorDef) => {
     setSelectedFloor(floor);
   }, []);
 
-  /* 현재 선택된 층 ID */
-  const activeFloorId = selectedFloor?.id ?? null;
+  /* 뒤로가기 → 조감도 */
+  const handleBack = useCallback(() => {
+    setSelectedBuilding(null);
+    setSelectedFloor(null);
+  }, []);
 
   return (
-    <div
-      className="flex"
-      style={{ height: 'calc(100vh - 108px)' }}
-    >
-      {/* ── 왼쪽: 건물/층 선택 패널 ── */}
-      <BuildingFloorPanel
-        selectedFloorId={activeFloorId}
-        onSelect={handleFloorSelect}
-      />
-
-      {/* ── 오른쪽: 조감도 or 도면 뷰어 ── */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {selectedFloor && selectedBuilding ? (
-          /* 층 도면 뷰 */
-          <FloorView
-            key={selectedFloor.id}
-            floor={selectedFloor}
-            buildingName={selectedBuilding}
-            onFloorSelect={handleFloorSelect}
-          />
-        ) : (
-          /* 조감도 — 폴리곤 클릭 시 해당 건물 첫 번째 층으로 진입 */
-          <AerialView
-            onBuildingSelect={(buildingName) => {
-              const floors = BUILDING_FLOORS[buildingName];
-              if (floors && floors.length > 0) {
-                /* 층이 1개면 바로 진입, 여러 개면 첫 번째 층으로 진입 */
-                handleFloorSelect(buildingName, floors[0]);
-              }
-            }}
-          />
-        )}
-      </div>
+    <div className="flex" style={{ height: 'calc(100vh - 108px)' }}>
+      {selectedFloor && selectedBuilding ? (
+        <FloorView
+          key={selectedFloor.id}
+          building={selectedBuilding}
+          floor={selectedFloor}
+          onBack={handleBack}
+          onFloorChange={handleFloorChange}
+        />
+      ) : (
+        <AerialView onBuildingSelect={handleBuildingSelect} />
+      )}
     </div>
   );
 }
