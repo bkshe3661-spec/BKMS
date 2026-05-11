@@ -2,12 +2,15 @@
  * 소화기 상태 자동 계산 유틸
  *
  * 우선순위:
+ *  0순위 불량     : status === '폐기' (수동 지정)
  *  1순위 교체대상 : 제조년월 + 10년 < 오늘
  *  2순위 점검필요 : 최근 점검일이 30일 초과 or 비어있음
  *  3순위 양호     : 최근 점검일이 30일 이내
  */
 
-export type ComputedStatus = '교체대상' | '점검필요' | '양호';
+import type { ExtinguisherStatus } from '../types/extinguisher';
+
+export type ComputedStatus = '불량' | '교체대상' | '점검필요' | '양호';
 
 export interface StatusStyle {
   label: ComputedStatus;
@@ -40,7 +43,10 @@ export function calcReplaceMonth(mfgDate: string): string {
 }
 
 /** 상태 자동 계산 */
-export function calcStatus(mfgDate: string, lastCheckDate: string): ComputedStatus {
+export function calcStatus(mfgDate: string, lastCheckDate: string, status?: ExtinguisherStatus): ComputedStatus {
+  // 0순위: 불량 (status가 '폐기'로 수동 지정된 경우)
+  if (status === '폐기') return '불량';
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -64,6 +70,7 @@ export function calcStatus(mfgDate: string, lastCheckDate: string): ComputedStat
 
 /** 상태별 Tailwind 스타일 */
 export const STATUS_STYLE: Record<ComputedStatus, StatusStyle> = {
+  불량:    { label: '불량',    bg: 'bg-purple-100', text: 'text-purple-700', dot: 'bg-purple-500' },
   양호:    { label: '양호',    bg: 'bg-green-100',  text: 'text-green-700',  dot: 'bg-green-500'  },
   점검필요: { label: '점검필요', bg: 'bg-orange-100', text: 'text-orange-700', dot: 'bg-orange-500' },
   교체대상: { label: '교체대상', bg: 'bg-red-100',    text: 'text-red-700',    dot: 'bg-red-500'    },

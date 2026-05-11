@@ -6,6 +6,32 @@ import type { Extinguisher, ExtinguisherStatus } from '../../types/extinguisher'
 import type { ComputedStatus } from '../../utils/statusCalc';
 
 /* ─────────────────────────────────────────
+   공통 상수
+───────────────────────────────────────── */
+/** 소화기 종류 선택 목록 */
+const FE_TYPES = [
+  'ABC 분말 3.3kg',
+  'ABC 분말 4.5kg',
+  '하론 3kg',
+  'K급(4L) 7.5kg',
+  '자동확산 3kg',
+] as const;
+
+/**
+ * 제조년월 입력 자동 포맷
+ *  - "202405"  → "2024-05"
+ *  - "2024-05" → "2024-05" (이미 올바른 형태)
+ *  - 그 외      → 그대로 반환 (타이핑 중간 상태 허용)
+ */
+function formatMfgDate(raw: string): string {
+  const digits = raw.replace(/-/g, '').trim();
+  if (digits.length === 6 && /^\d{6}$/.test(digits)) {
+    return `${digits.slice(0, 4)}-${digits.slice(4, 6)}`;
+  }
+  return raw;
+}
+
+/* ─────────────────────────────────────────
    타입
 ───────────────────────────────────────── */
 type FilterStatus = '전체' | ComputedStatus;
@@ -17,7 +43,7 @@ interface EnrichedExtinguisher extends Extinguisher {
 }
 
 /* ─────────────────────────────────────────
-   점검 체크리스트 항목 정의
+   점검 체크리스트
 ───────────────────────────────────────── */
 const CHECK_ITEMS = [
   '안전핀 및 봉인 상태 확인',
@@ -28,8 +54,7 @@ const CHECK_ITEMS = [
 
 /* ─────────────────────────────────────────
    요약 카드 정의
-   - key 반드시 고유 → 단일 선택 동작 보장
-   - '불량' 카드: 클릭 무시(필터 없음), disabled 제거 → 일반 표시 카드
+   - '불량' 카드: status==='폐기' 항목 집계, 클릭 시 필터 적용
 ───────────────────────────────────────── */
 type SummaryKey = '전체' | '양호' | '점검필요' | '교체대상' | '불량';
 
@@ -76,7 +101,7 @@ const SUMMARY_CARDS: SummaryCard[] = [
   },
   {
     key: '불량',
-    label: '불량(준비중)',
+    label: '불량',
     gradient: 'bg-purple-600',
     icon: (
       <svg className="w-7 h-7 text-purple-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -113,10 +138,7 @@ const BADGE: Record<string, { bg: string; text: string; dot: string }> = {
 ───────────────────────────────────────── */
 function todayStr(): string {
   const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 /* ═══════════════════════════════════════════
@@ -132,22 +154,17 @@ interface AddForm {
   note: string;
 }
 
-const STATUS_OPTIONS: { value: ExtinguisherStatus; label: string }[] = [
-  { value: '정상',   label: '정상' },
+const ADD_STATUS_OPTIONS: { value: ExtinguisherStatus; label: string }[] = [
+  { value: '정상',    label: '정상' },
   { value: '점검필요', label: '점검필요' },
   { value: '교체대상', label: '교체대상' },
+  { value: '폐기',    label: '폐기 (불량)' },
 ];
 
-function AddModal({
-  onClose,
-  onSaved,
-}: {
-  onClose: () => void;
-  onSaved: () => void;
-}) {
+function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState<AddForm>({
     location:      '',
-    type:          '',
+    type:          FE_TYPES[0],
     mfgDate:       '',
     lastCheckDate: '',
     manager:       '',
@@ -159,16 +176,15 @@ function AddModal({
     setForm(f => ({ ...f, [k]: v }));
 
   const handleSave = () => {
+    const finalMfgDate = formatMfgDate(form.mfgDate.trim());
     if (!form.location.trim()) { alert('설치 위치를 입력하세요.'); return; }
-    if (!form.type.trim())     { alert('소화기 종류를 입력하세요.'); return; }
-    if (!form.mfgDate.trim())  { alert('제조년월을 입력하세요.'); return; }
+    if (!finalMfgDate.trim())  { alert('제조년월을 입력하세요.'); return; }
 
-    const newId = getNextExtinguisherId();
     const newFe: Extinguisher = {
-      id:            newId,
+      id:            getNextExtinguisherId(),
       location:      form.location.trim(),
-      type:          form.type.trim(),
-      mfgDate:       form.mfgDate.trim(),
+      type:          form.type,
+      mfgDate:       finalMfgDate,
       lastCheckDate: form.lastCheckDate,
       manager:       form.manager.trim(),
       status:        form.status,
@@ -189,7 +205,7 @@ function AddModal({
         className="bg-white rounded-2xl shadow-2xl w-[480px] max-w-[95vw] overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        {/* ── 헤더 ── */}
+        {/* 헤더 */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
           <div className="flex items-center gap-2">
             <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -197,18 +213,16 @@ function AddModal({
             </svg>
             <h2 className="text-lg font-bold text-gray-900">소화기 추가</h2>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
-          >
+          <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        {/* ── 폼 ── */}
+        {/* 폼 */}
         <div className="px-6 py-5 space-y-4 max-h-[65vh] overflow-y-auto">
+          {/* 설치 위치 */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">
               설치 위치 <span className="text-red-500">*</span>
@@ -220,35 +234,44 @@ function AddModal({
               className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
                          focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               placeholder="예) 관리동 1층(현관)"
+              autoFocus
             />
           </div>
+
+          {/* 소화기 종류 — 드롭다운 */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">
               소화기 종류 <span className="text-red-500">*</span>
             </label>
-            <input
-              type="text"
+            <select
               value={form.type}
               onChange={e => set('type', e.target.value)}
               className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
-                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="예) ABC분말 3.3kg"
-            />
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+            >
+              {FE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
           </div>
+
+          {/* 제조년월 — 자동 포맷 (202405 → 2024-05) */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">
               제조년월 <span className="text-red-500">*</span>
-              <span className="text-gray-400 font-normal ml-1">(YYYY-MM)</span>
+              <span className="text-gray-400 font-normal ml-1">(202405 또는 2024-05)</span>
             </label>
             <input
               type="text"
               value={form.mfgDate}
               onChange={e => set('mfgDate', e.target.value)}
+              onBlur={e => set('mfgDate', formatMfgDate(e.target.value))}
               className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
                          focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="예) 2024-08"
+              placeholder="예) 202408 또는 2024-08"
+              maxLength={7}
             />
           </div>
+
+          {/* 담당자 */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">담당자</label>
             <input
@@ -260,6 +283,8 @@ function AddModal({
               placeholder="담당자 이름"
             />
           </div>
+
+          {/* 최근 점검일 */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">최근 점검일</label>
             <input
@@ -270,19 +295,23 @@ function AddModal({
                          focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
+
+          {/* 상태 */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">상태</label>
             <select
               value={form.status}
-              onChange={e => set('status', e.target.value)}
+              onChange={e => set('status', e.target.value as ExtinguisherStatus)}
               className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
                          focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
             >
-              {STATUS_OPTIONS.map(o => (
+              {ADD_STATUS_OPTIONS.map(o => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
           </div>
+
+          {/* 비고 */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">비고</label>
             <textarea
@@ -296,13 +325,12 @@ function AddModal({
           </div>
         </div>
 
-        {/* ── 하단 버튼 ── */}
+        {/* 하단 버튼 */}
         <div className="px-6 pb-6 pt-2 flex gap-3 border-t border-gray-100">
           <button
             onClick={handleSave}
             className="flex-1 flex items-center justify-center gap-2 py-3
-                       bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold
-                       rounded-xl transition shadow-sm"
+                       bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition shadow-sm"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
@@ -326,52 +354,37 @@ function AddModal({
    점검 모달
 ═══════════════════════════════════════════ */
 function InspectModal({
-  item,
-  onClose,
-  onDone,
+  item, onClose, onDone,
 }: {
   item: EnrichedExtinguisher;
   onClose: () => void;
   onDone: (updated: Extinguisher) => void;
 }) {
-  const [checks, setChecks] = useState<(boolean | null)[]>(
-    CHECK_ITEMS.map(() => null)
-  );
+  const [checks, setChecks] = useState<(boolean | null)[]>(CHECK_ITEMS.map(() => null));
 
-  const toggle = (idx: number, val: boolean) => {
+  const toggle = (idx: number, val: boolean) =>
     setChecks(prev => prev.map((v, i) => (i === idx ? val : v)));
-  };
 
   const allSelected = checks.every(v => v !== null);
   const allNormal   = checks.every(v => v === true);
 
   const handleDone = async () => {
-    if (!allSelected) {
-      alert('모든 항목을 선택해 주세요.');
-      return;
-    }
-    const today = todayStr();
-    const newStatus = allNormal ? '정상' : '점검필요';
+    if (!allSelected) { alert('모든 항목을 선택해 주세요.'); return; }
     const updated: Extinguisher = {
       ...item,
-      lastCheckDate: today,
-      status: newStatus as Extinguisher['status'],
+      lastCheckDate: todayStr(),
+      status: (allNormal ? '정상' : '점검필요') as Extinguisher['status'],
     };
     await updateExtinguisher(updated);
     onDone(updated);
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.45)' }}
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-2xl shadow-2xl w-[480px] max-w-[95vw] overflow-hidden"
-        onClick={e => e.stopPropagation()}
-      >
-        {/* ── 헤더 ── */}
+    <div className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.45)' }} onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-[480px] max-w-[95vw] overflow-hidden"
+        onClick={e => e.stopPropagation()}>
+        {/* 헤더 */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
           <div>
             <div className="flex items-center gap-2">
@@ -381,21 +394,16 @@ function InspectModal({
               </svg>
               <h2 className="text-lg font-bold text-gray-900">소화기 점검</h2>
             </div>
-            <p className="text-xs text-gray-400 mt-1">
-              항목별로 정상 여부를 선택하면 점검 결과가 자동으로 갱신됩니다.
-            </p>
+            <p className="text-xs text-gray-400 mt-1">항목별로 정상 여부를 선택하면 점검 결과가 자동으로 갱신됩니다.</p>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
-          >
+          <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        {/* ── 소화기 요약 카드 ── */}
+        {/* 소화기 요약 */}
         <div className="px-6 pt-4 pb-2">
           <div className="flex items-center gap-3 p-3.5 bg-gray-50 rounded-xl border border-gray-100">
             <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center flex-shrink-0">
@@ -406,56 +414,34 @@ function InspectModal({
             <div>
               <p className="text-sm font-bold text-gray-900">{item.location}</p>
               <p className="text-xs text-gray-400 mt-0.5">
-                {item.type}
-                {item.mfgDate && ` · 제조 ${item.mfgDate}`}
-                {` · ${item.id}`}
+                {item.type}{item.mfgDate && ` · 제조 ${item.mfgDate}`} · {item.id}
               </p>
             </div>
           </div>
         </div>
 
-        {/* ── 체크리스트 ── */}
-        <div className="px-6 py-2 space-y-0 divide-y divide-gray-100">
+        {/* 체크리스트 */}
+        <div className="px-6 py-2 divide-y divide-gray-100">
           {CHECK_ITEMS.map((label, idx) => (
             <div key={idx} className="flex items-center justify-between py-3.5">
               <div className="flex items-center gap-3">
                 <span className="w-6 h-6 rounded-full bg-gray-100 text-gray-500
-                                 flex items-center justify-center text-xs font-bold flex-shrink-0">
-                  {idx + 1}
-                </span>
+                                 flex items-center justify-center text-xs font-bold flex-shrink-0">{idx + 1}</span>
                 <span className="text-sm text-gray-700">{label}</span>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0 ml-4">
-                <button
-                  onClick={() => toggle(idx, true)}
-                  className={[
-                    'flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all',
-                    checks[idx] === true
-                      ? 'bg-emerald-500 text-white shadow-sm'
-                      : 'bg-gray-100 text-gray-400 hover:bg-gray-200',
-                  ].join(' ')}
-                >
-                  {checks[idx] === true && (
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                    </svg>
-                  )}
+                <button onClick={() => toggle(idx, true)}
+                  className={['flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all',
+                    checks[idx] === true ? 'bg-emerald-500 text-white shadow-sm' : 'bg-gray-100 text-gray-400 hover:bg-gray-200',
+                  ].join(' ')}>
+                  {checks[idx] === true && <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                   정상
                 </button>
-                <button
-                  onClick={() => toggle(idx, false)}
-                  className={[
-                    'flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all',
-                    checks[idx] === false
-                      ? 'bg-red-500 text-white shadow-sm'
-                      : 'bg-gray-100 text-gray-400 hover:bg-gray-200',
-                  ].join(' ')}
-                >
-                  {checks[idx] === false && (
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  )}
+                <button onClick={() => toggle(idx, false)}
+                  className={['flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all',
+                    checks[idx] === false ? 'bg-red-500 text-white shadow-sm' : 'bg-gray-100 text-gray-400 hover:bg-gray-200',
+                  ].join(' ')}>
+                  {checks[idx] === false && <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>}
                   비정상
                 </button>
               </div>
@@ -463,56 +449,31 @@ function InspectModal({
           ))}
         </div>
 
-        {/* ── 결과 알림 ── */}
+        {/* 결과 알림 */}
         {allSelected && (
-          <div className={[
-            'mx-6 mb-3 px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-medium',
-            allNormal
-              ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
-              : 'bg-red-50 text-red-600 border border-red-100',
+          <div className={['mx-6 mb-3 px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-medium',
+            allNormal ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-red-50 text-red-600 border border-red-100',
           ].join(' ')}>
-            {allNormal ? (
-              <>
-                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                </svg>
-                모든 항목 정상 — 점검 완료 시 양호로 갱신됩니다.
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-                    d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                </svg>
-                비정상 항목 있음 — 점검 완료 시 점검필요로 갱신됩니다.
-              </>
-            )}
+            {allNormal
+              ? <><svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>모든 항목 정상 — 점검 완료 시 양호로 갱신됩니다.</>
+              : <><svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>비정상 항목 있음 — 점검 완료 시 점검필요로 갱신됩니다.</>
+            }
           </div>
         )}
 
-        {/* ── 하단 버튼 ── */}
+        {/* 하단 버튼 */}
         <div className="px-6 pb-6 pt-2 flex gap-3">
-          <button
-            onClick={handleDone}
-            disabled={!allSelected}
-            className={[
-              'flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all',
-              allSelected
-                ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm'
-                : 'bg-gray-100 text-gray-300 cursor-not-allowed',
-            ].join(' ')}
-          >
+          <button onClick={handleDone} disabled={!allSelected}
+            className={['flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all',
+              allSelected ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm' : 'bg-gray-100 text-gray-300 cursor-not-allowed',
+            ].join(' ')}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             점검 완료
           </button>
-          <button
-            onClick={onClose}
-            className="px-5 py-3 text-sm font-semibold text-gray-500 bg-gray-50 hover:bg-gray-100
-                       border border-gray-200 rounded-xl transition"
-          >
+          <button onClick={onClose}
+            className="px-5 py-3 text-sm font-semibold text-gray-500 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl transition">
             취소
           </button>
         </div>
@@ -530,13 +491,19 @@ interface EditForm {
   mfgDate: string;
   manager: string;
   lastCheckDate: string;
+  status: ExtinguisherStatus;
   note: string;
 }
 
+const EDIT_STATUS_OPTIONS: { value: ExtinguisherStatus; label: string }[] = [
+  { value: '정상',    label: '정상' },
+  { value: '점검필요', label: '점검필요' },
+  { value: '교체대상', label: '교체대상' },
+  { value: '폐기',    label: '폐기 (불량)' },
+];
+
 function EditModal({
-  item,
-  onClose,
-  onSave,
+  item, onClose, onSave,
 }: {
   item: EnrichedExtinguisher;
   onClose: () => void;
@@ -548,6 +515,7 @@ function EditModal({
     mfgDate:       item.mfgDate,
     manager:       item.manager,
     lastCheckDate: item.lastCheckDate,
+    status:        item.status,
     note:          item.note,
   });
 
@@ -555,17 +523,19 @@ function EditModal({
     setForm(f => ({ ...f, [k]: v }));
 
   const handleSave = async () => {
+    const finalMfgDate = formatMfgDate(form.mfgDate.trim());
     if (!form.location.trim()) { alert('설치 위치를 입력하세요.'); return; }
     if (!form.type.trim())     { alert('소화기 종류를 입력하세요.'); return; }
-    if (!form.mfgDate.trim())  { alert('제조년월을 입력하세요.'); return; }
+    if (!finalMfgDate.trim())  { alert('제조년월을 입력하세요.'); return; }
 
     const updated: Extinguisher = {
       ...item,
       location:      form.location.trim(),
       type:          form.type.trim(),
-      mfgDate:       form.mfgDate.trim(),
+      mfgDate:       finalMfgDate,
       manager:       form.manager.trim(),
       lastCheckDate: form.lastCheckDate,
+      status:        form.status,
       note:          form.note.trim(),
     };
     await updateExtinguisher(updated);
@@ -573,129 +543,99 @@ function EditModal({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.45)' }}
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-2xl shadow-2xl w-[480px] max-w-[95vw] overflow-hidden"
-        onClick={e => e.stopPropagation()}
-      >
-        {/* ── 헤더 ── */}
+    <div className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.45)' }} onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-[480px] max-w-[95vw] overflow-hidden"
+        onClick={e => e.stopPropagation()}>
+        {/* 헤더 */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
           <div className="flex items-center gap-2">
             <svg className="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5
-                   m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
             <h2 className="text-lg font-bold text-gray-900">소화기 정보 수정</h2>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
-          >
+          <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        {/* ── 폼 ── */}
+        {/* 폼 */}
         <div className="px-6 py-5 space-y-4 max-h-[65vh] overflow-y-auto">
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">
               설치 위치 <span className="text-red-500">*</span>
             </label>
-            <input
-              type="text"
-              value={form.location}
-              onChange={e => set('location', e.target.value)}
-              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
-                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="예) 관리동 1층(현관)"
-            />
+            <input type="text" value={form.location} onChange={e => set('location', e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="예) 관리동 1층(현관)" />
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">
               소화기 종류 <span className="text-red-500">*</span>
             </label>
-            <input
-              type="text"
-              value={form.type}
-              onChange={e => set('type', e.target.value)}
-              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
-                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="예) ABC분말 3.3kg"
-            />
+            <select value={form.type} onChange={e => set('type', e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white">
+              {FE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              {/* 기존 데이터가 목록에 없는 종류일 경우 표시용 옵션 */}
+              {!FE_TYPES.includes(form.type as typeof FE_TYPES[number]) && form.type && (
+                <option value={form.type}>{form.type}</option>
+              )}
+            </select>
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">
               제조년월 <span className="text-red-500">*</span>
-              <span className="text-gray-400 font-normal ml-1">(YYYY-MM)</span>
+              <span className="text-gray-400 font-normal ml-1">(202405 또는 2024-05)</span>
             </label>
-            <input
-              type="text"
-              value={form.mfgDate}
+            <input type="text" value={form.mfgDate}
               onChange={e => set('mfgDate', e.target.value)}
-              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
-                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="예) 2024-08"
-            />
+              onBlur={e => set('mfgDate', formatMfgDate(e.target.value))}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="예) 202408 또는 2024-08" maxLength={7} />
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">담당자</label>
-            <input
-              type="text"
-              value={form.manager}
-              onChange={e => set('manager', e.target.value)}
-              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
-                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="담당자 이름"
-            />
+            <input type="text" value={form.manager} onChange={e => set('manager', e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="담당자 이름" />
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">최근 점검일</label>
-            <input
-              type="date"
-              value={form.lastCheckDate}
-              onChange={e => set('lastCheckDate', e.target.value)}
-              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
-                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
+            <input type="date" value={form.lastCheckDate} onChange={e => set('lastCheckDate', e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">상태</label>
+            <select value={form.status} onChange={e => set('status', e.target.value as ExtinguisherStatus)}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white">
+              {EDIT_STATUS_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">비고</label>
-            <textarea
-              value={form.note}
-              onChange={e => set('note', e.target.value)}
-              rows={2}
-              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg resize-none
-                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="특이사항 입력"
-            />
+            <textarea value={form.note} onChange={e => set('note', e.target.value)} rows={2}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="특이사항 입력" />
           </div>
         </div>
 
-        {/* ── 하단 버튼 ── */}
+        {/* 하단 버튼 */}
         <div className="px-6 pb-6 pt-2 flex gap-3 border-t border-gray-100">
-          <button
-            onClick={handleSave}
-            className="flex-1 flex items-center justify-center gap-2 py-3
-                       bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold
-                       rounded-xl transition shadow-sm"
-          >
+          <button onClick={handleSave}
+            className="flex-1 flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition shadow-sm">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
             </svg>
             저장
           </button>
-          <button
-            onClick={onClose}
-            className="px-5 py-3 text-sm font-semibold text-gray-500 bg-gray-50 hover:bg-gray-100
-                       border border-gray-200 rounded-xl transition"
-          >
+          <button onClick={onClose}
+            className="px-5 py-3 text-sm font-semibold text-gray-500 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl transition">
             취소
           </button>
         </div>
@@ -708,9 +648,7 @@ function EditModal({
    삭제 확인 모달
 ═══════════════════════════════════════════ */
 function DeleteModal({
-  item,
-  onClose,
-  onDelete,
+  item, onClose, onDelete,
 }: {
   item: EnrichedExtinguisher;
   onClose: () => void;
@@ -722,21 +660,15 @@ function DeleteModal({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.45)' }}
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-2xl shadow-2xl w-[380px] max-w-[95vw] overflow-hidden"
-        onClick={e => e.stopPropagation()}
-      >
+    <div className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.45)' }} onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-[380px] max-w-[95vw] overflow-hidden"
+        onClick={e => e.stopPropagation()}>
         <div className="px-8 pt-8 pb-6 text-center">
           <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-5">
             <svg className="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7
-                   m5 4v6m4-6v6M1 7h22M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" />
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" />
             </svg>
           </div>
           <h2 className="text-lg font-bold text-gray-900 mb-2">소화기를 삭제할까요?</h2>
@@ -745,24 +677,16 @@ function DeleteModal({
           </p>
         </div>
         <div className="px-6 pb-6 flex gap-3">
-          <button
-            onClick={handleDelete}
-            className="flex-1 flex items-center justify-center gap-2 py-3
-                       bg-red-500 hover:bg-red-600 text-white text-sm font-bold
-                       rounded-xl transition shadow-sm"
-          >
+          <button onClick={handleDelete}
+            className="flex-1 flex items-center justify-center gap-2 py-3 bg-red-500 hover:bg-red-600 text-white text-sm font-bold rounded-xl transition shadow-sm">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7
-                   m5 4v6m4-6v6M1 7h22M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" />
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" />
             </svg>
             삭제
           </button>
-          <button
-            onClick={onClose}
-            className="px-5 py-3 text-sm font-semibold text-gray-500 bg-gray-50 hover:bg-gray-100
-                       border border-gray-200 rounded-xl transition"
-          >
+          <button onClick={onClose}
+            className="px-5 py-3 text-sm font-semibold text-gray-500 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl transition">
             취소
           </button>
         </div>
@@ -772,7 +696,7 @@ function DeleteModal({
 }
 
 /* ═══════════════════════════════════════════
-   메인 ListView 컴포넌트 — props 없음
+   메인 ListView 컴포넌트
 ═══════════════════════════════════════════ */
 export default function ListView() {
   const [data, setData]               = useState<EnrichedExtinguisher[]>([]);
@@ -780,17 +704,16 @@ export default function ListView() {
   const [searchText, setSearchText]   = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
 
-  /* 모달 상태 */
   const [inspectTarget, setInspectTarget] = useState<EnrichedExtinguisher | null>(null);
   const [editTarget,    setEditTarget]    = useState<EnrichedExtinguisher | null>(null);
   const [deleteTarget,  setDeleteTarget]  = useState<EnrichedExtinguisher | null>(null);
 
-  /* ── 데이터 로드 ── */
+  /* 데이터 로드 */
   const loadData = async () => {
     const raw = await getAllExtinguishers();
     const enriched: EnrichedExtinguisher[] = raw.map((item, idx) => ({
       ...item,
-      computedStatus: calcStatus(item.mfgDate, item.lastCheckDate),
+      computedStatus: calcStatus(item.mfgDate, item.lastCheckDate, item.status),
       replaceMonth:   calcReplaceMonth(item.mfgDate),
       no:             idx + 1,
     }));
@@ -799,27 +722,26 @@ export default function ListView() {
 
   useEffect(() => { loadData(); }, []);
 
-  /* ── 집계 ── */
+  /* 집계 */
   const counts = useMemo(() => ({
     전체:    data.length,
     양호:    data.filter(d => d.computedStatus === '양호').length,
     점검필요: data.filter(d => d.computedStatus === '점검필요').length,
-    불량:    0, // 미구현
+    불량:    data.filter(d => d.computedStatus === '불량').length,
     교체대상: data.filter(d => d.computedStatus === '교체대상').length,
   }), [data]);
 
-  /* ── 단일 선택 필터 토글
-       같은 카드를 다시 누르면 '전체'로 복귀
-       '불량' 카드는 미구현이므로 클릭해도 필터 변경 없음 ── */
+  /* 단일 선택 필터 — 모든 카드 클릭 가능, 같은 카드 재클릭 시 전체 복귀 */
   const handleFilterClick = (key: SummaryKey) => {
-    if (key === '불량') return; // 미구현 — 클릭 무시
     setFilterStatus(prev => (prev === key ? '전체' : key));
   };
 
-  /* ── 필터 + 검색 ── */
+  /* 필터 + 검색 */
   const filtered = useMemo(() => {
     let result =
-      filterStatus === '전체' ? data : data.filter(d => d.computedStatus === filterStatus);
+      filterStatus === '전체'
+        ? data
+        : data.filter(d => d.computedStatus === (filterStatus as ComputedStatus));
     if (searchText.trim()) {
       const q = searchText.trim().toLowerCase();
       result = result.filter(d =>
@@ -831,52 +753,29 @@ export default function ListView() {
     return result;
   }, [data, filterStatus, searchText]);
 
-  /* ── 점검 완료 콜백 ── */
-  const handleInspectDone = (_updated: Extinguisher) => {
-    setInspectTarget(null);
-    loadData();
-  };
-
-  /* ── 수정 저장 콜백 ── */
-  const handleEditSave = (_updated: Extinguisher) => {
-    setEditTarget(null);
-    loadData();
-  };
-
-  /* ── 삭제 완료 콜백 ── */
-  const handleDeleteDone = () => {
-    setDeleteTarget(null);
-    loadData();
-  };
-
-  /* ── 추가 완료 콜백 ── */
-  const handleAddSaved = () => {
-    setShowAddModal(false);
-    loadData();
-  };
+  const handleInspectDone = (_: Extinguisher) => { setInspectTarget(null); loadData(); };
+  const handleEditSave    = (_: Extinguisher) => { setEditTarget(null);    loadData(); };
+  const handleDeleteDone  = ()               => { setDeleteTarget(null);  loadData(); };
+  const handleAddSaved    = ()               => { setShowAddModal(false); loadData(); };
 
   return (
     <div className="p-6 space-y-4 bg-gray-50 min-h-full">
 
-      {/* ── 요약 카드 5개 ── */}
+      {/* 요약 카드 5개 */}
       <div className="grid grid-cols-5 gap-4">
         {SUMMARY_CARDS.map(({ key, label, gradient, icon }) => {
           const count    = counts[key] ?? 0;
           const isActive = filterStatus === key;
-          // '불량' 카드: disabled 제거 — 일반 div처럼 보이되 클릭 시 아무 필터도 적용 안 됨
-          const isBadge  = key === '불량';
           return (
             <button
               key={key}
               onClick={() => handleFilterClick(key)}
               className={[
                 gradient,
-                'relative rounded-xl p-5 text-left text-white transition-all shadow-md',
-                isBadge
-                  ? 'cursor-default'   // 클릭은 되지만 필터 변경 없음, 시각적 눌림 없음
-                  : isActive
-                    ? 'ring-4 ring-white ring-offset-2 ring-offset-gray-200 scale-[1.02]'
-                    : 'hover:brightness-105 hover:shadow-lg cursor-pointer',
+                'relative rounded-xl p-5 text-left text-white transition-all shadow-md cursor-pointer',
+                isActive
+                  ? 'ring-4 ring-white ring-offset-2 ring-offset-gray-200 scale-[1.02]'
+                  : 'hover:brightness-105 hover:shadow-lg',
               ].join(' ')}
             >
               <div className="absolute top-4 right-4 opacity-60">{icon}</div>
@@ -884,7 +783,7 @@ export default function ListView() {
               <p className="text-4xl font-black text-white leading-none">
                 {count}<span className="text-lg font-semibold ml-1">개</span>
               </p>
-              {isActive && !isBadge && (
+              {isActive && (
                 <div className="mt-2 flex items-center gap-1 text-white/80 text-xs">
                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd"
@@ -899,7 +798,7 @@ export default function ListView() {
         })}
       </div>
 
-      {/* ── 검색창 + 소화기 추가 버튼 ── */}
+      {/* 검색창 + 추가 버튼 */}
       <div className="flex items-center justify-between gap-4">
         <div className="relative flex-1 max-w-sm">
           <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
@@ -908,26 +807,20 @@ export default function ListView() {
               d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
           </svg>
           <input
-            type="text"
-            value={searchText}
-            onChange={e => setSearchText(e.target.value)}
+            type="text" value={searchText} onChange={e => setSearchText(e.target.value)}
             placeholder="위치, 종류, 담당자 검색..."
             className="w-full pl-10 pr-9 py-2.5 text-sm border border-gray-300 rounded-lg bg-white
                        focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm"
           />
           {searchText && (
-            <button
-              onClick={() => setSearchText('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-            >
+            <button onClick={() => setSearchText('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           )}
         </div>
-
-        {/* + 소화기 추가 → AddModal 오픈 */}
         <button
           onClick={() => setShowAddModal(true)}
           className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-700
@@ -940,7 +833,7 @@ export default function ListView() {
         </button>
       </div>
 
-      {/* ── 데이터 테이블 ── */}
+      {/* 데이터 테이블 */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
           <span className="text-sm text-gray-500">
@@ -984,9 +877,7 @@ export default function ListView() {
                   <td colSpan={11} className="py-20 text-center text-gray-400">
                     <div className="text-4xl mb-3">🧯</div>
                     <p className="text-sm font-medium text-gray-500 mb-1">
-                      {data.length === 0
-                        ? '등록된 소화기가 없습니다.'
-                        : '검색 결과가 없습니다.'}
+                      {data.length === 0 ? '등록된 소화기가 없습니다.' : '검색 결과가 없습니다.'}
                     </p>
                     {data.length === 0 && (
                       <button
@@ -1015,53 +906,27 @@ export default function ListView() {
                   const checkColor    = isCheckNeeded || isReplace ? 'text-amber-500 font-medium' : 'text-gray-600';
 
                   return (
-                    <tr
-                      key={item.id}
-                      className={[
-                        'hover:bg-blue-50/30 transition-colors',
-                        isReplace ? 'bg-red-50/50' : '',
-                      ].join(' ')}
-                    >
-                      {/* NO. */}
-                      <td className="px-4 py-3.5 text-center text-xs text-gray-400 font-medium">
-                        {item.no}
-                      </td>
-
-                      {/* 고유번호 */}
+                    <tr key={item.id}
+                      className={['hover:bg-blue-50/30 transition-colors', isReplace ? 'bg-red-50/50' : ''].join(' ')}>
+                      <td className="px-4 py-3.5 text-center text-xs text-gray-400 font-medium">{item.no}</td>
                       <td className="px-4 py-3.5">
-                        <span className="font-mono text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
-                          {item.id}
-                        </span>
+                        <span className="font-mono text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">{item.id}</span>
                       </td>
-
-                      {/* 설치 위치 */}
                       <td className="px-4 py-3.5">
                         <div className="text-[11px] text-gray-400 mb-0.5 truncate max-w-[180px]">{locTop}</div>
                         <div className="text-sm font-semibold text-gray-800">{locBot}</div>
                       </td>
-
-                      {/* 소화기 종류 */}
                       <td className="px-4 py-3.5 whitespace-nowrap">
                         <div className="text-xs text-gray-700 leading-snug">{item.type}</div>
                       </td>
-
-                      {/* 제조년월 */}
-                      <td className="px-4 py-3.5 text-center text-xs text-gray-500 whitespace-nowrap">
-                        {item.mfgDate}
-                      </td>
-
-                      {/* 교체년월 */}
+                      <td className="px-4 py-3.5 text-center text-xs text-gray-500 whitespace-nowrap">{item.mfgDate}</td>
                       <td className={`px-4 py-3.5 text-center text-xs whitespace-nowrap ${replaceColor}`}>
                         {item.replaceMonth}
                         {isReplace && <div className="text-[10px] text-red-400 mt-0.5">기한 초과</div>}
                       </td>
-
-                      {/* 최근 점검일 */}
                       <td className={`px-4 py-3.5 text-center text-xs whitespace-nowrap ${checkColor}`}>
                         {item.lastCheckDate || '-'}
                       </td>
-
-                      {/* 상태 뱃지 */}
                       <td className="px-4 py-3.5 text-center">
                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full
                                           text-xs font-semibold whitespace-nowrap ${badge.bg} ${badge.text}`}>
@@ -1069,66 +934,36 @@ export default function ListView() {
                           {item.computedStatus}
                         </span>
                       </td>
-
-                      {/* 담당자 */}
                       <td className="px-4 py-3.5 text-center text-sm text-gray-700 whitespace-nowrap">
                         {item.manager || <span className="text-gray-300">-</span>}
                       </td>
-
-                      {/* 비고 */}
                       <td className="px-4 py-3.5 text-xs text-gray-500 max-w-[120px]">
-                        {item.note
-                          ? <span className="text-amber-600">{item.note}</span>
-                          : <span className="text-gray-300">-</span>}
+                        {item.note ? <span className="text-amber-600">{item.note}</span> : <span className="text-gray-300">-</span>}
                       </td>
-
-                      {/* ── 관리 버튼 3개 ── */}
                       <td className="px-4 py-3.5">
                         <div className="flex items-center justify-center gap-1.5">
-
-                          {/* 점검 */}
-                          <button
-                            onClick={() => setInspectTarget(item)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5
-                                       text-xs font-semibold text-white bg-blue-600
-                                       rounded-md hover:bg-blue-700 transition whitespace-nowrap shadow-sm"
-                          >
+                          <button onClick={() => setInspectTarget(item)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 transition whitespace-nowrap shadow-sm">
                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2
-                                   M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                             </svg>
                             점검
                           </button>
-
-                          {/* 수정 */}
-                          <button
-                            onClick={() => setEditTarget(item)}
-                            className="p-1.5 text-gray-400 hover:text-amber-500
-                                       hover:bg-amber-50 rounded-md transition"
-                            title="수정"
-                          >
+                          <button onClick={() => setEditTarget(item)}
+                            className="p-1.5 text-gray-400 hover:text-amber-500 hover:bg-amber-50 rounded-md transition" title="수정">
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5
-                                   m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                             </svg>
                           </button>
-
-                          {/* 삭제 */}
-                          <button
-                            onClick={() => setDeleteTarget(item)}
-                            className="p-1.5 text-gray-400 hover:text-red-500
-                                       hover:bg-red-50 rounded-md transition"
-                            title="삭제"
-                          >
+                          <button onClick={() => setDeleteTarget(item)}
+                            className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition" title="삭제">
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7
-                                   m5 4v6m4-6v6M1 7h22M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" />
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" />
                             </svg>
                           </button>
-
                         </div>
                       </td>
                     </tr>
@@ -1140,34 +975,11 @@ export default function ListView() {
         </div>
       </div>
 
-      {/* ── 모달 렌더링 ── */}
-      {showAddModal && (
-        <AddModal
-          onClose={() => setShowAddModal(false)}
-          onSaved={handleAddSaved}
-        />
-      )}
-      {inspectTarget && (
-        <InspectModal
-          item={inspectTarget}
-          onClose={() => setInspectTarget(null)}
-          onDone={handleInspectDone}
-        />
-      )}
-      {editTarget && (
-        <EditModal
-          item={editTarget}
-          onClose={() => setEditTarget(null)}
-          onSave={handleEditSave}
-        />
-      )}
-      {deleteTarget && (
-        <DeleteModal
-          item={deleteTarget}
-          onClose={() => setDeleteTarget(null)}
-          onDelete={handleDeleteDone}
-        />
-      )}
+      {/* 모달 렌더링 */}
+      {showAddModal   && <AddModal     onClose={() => setShowAddModal(false)}   onSaved={handleAddSaved}    />}
+      {inspectTarget  && <InspectModal item={inspectTarget} onClose={() => setInspectTarget(null)} onDone={handleInspectDone} />}
+      {editTarget     && <EditModal    item={editTarget}    onClose={() => setEditTarget(null)}    onSave={handleEditSave}    />}
+      {deleteTarget   && <DeleteModal  item={deleteTarget}  onClose={() => setDeleteTarget(null)}  onDelete={handleDeleteDone} />}
 
     </div>
   );

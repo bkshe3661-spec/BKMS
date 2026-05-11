@@ -388,7 +388,14 @@ function AddModal({
               <input
                 value={form.mfgDate}
                 onChange={e => set('mfgDate', e.target.value)}
-                placeholder="YYYY-MM"
+                onBlur={e => {
+                  const digits = e.target.value.replace(/-/g, '').trim();
+                  if (digits.length === 6 && /^\d{6}$/.test(digits)) {
+                    set('mfgDate', `${digits.slice(0, 4)}-${digits.slice(4, 6)}`);
+                  }
+                }}
+                placeholder="202408 또는 2024-08"
+                maxLength={7}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
               />
             </div>
