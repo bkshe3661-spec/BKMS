@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { BagFilter } from '../../types/bagfilter';
 import {
-  getBagFiltersOnFloor,
+  getAllBagFilters,
   saveBagFilterPosition,
   removeBagFilterPosition,
   updateBagFilter,
@@ -14,20 +14,9 @@ import {
 const MAX_SCALE      = 8;
 const DRAG_THRESHOLD = 5;
 
-interface FloorDef {
-  id: string;
-  label: string;
-  img: string;
-  imgW: number;
-  imgH: number;
-}
-
-const BUILDING_FLOORS: Record<string, FloorDef[]> = {
-  '관리동': [
-    { id: '관리동_1층', label: '1층', img: '/floor-1f.png', imgW: 1024, imgH: 765 },
-    { id: '관리동_2층', label: '2층', img: '/floor-2f.png', imgW: 1024, imgH: 546 },
-  ],
-};
+const FACTORY_IMG     = '/factory-aerial-bf.jpg';
+const FACTORY_IMG_W   = 1024;
+const FACTORY_IMG_H   = 768;
 
 /* 화질 선명 고정 스타일 — will-change 절대 금지 */
 const SHARP_IMG_STYLE: React.CSSProperties = {
@@ -49,6 +38,18 @@ function getPinColor(bf: BagFilter): string {
   if (diff >= 365) return '#ef4444';   // 교체필요 — 빨강
   if (diff >= 300) return '#f59e0b';   // 교체임박 — 주황
   return '#22c55e';                    // 정상 — 초록
+}
+
+/* 교체 상태 라벨 */
+function getReplaceLabel(bf: BagFilter): string {
+  if (!bf.lastReplaceDate?.trim()) return '교체필요';
+  const d = new Date(bf.lastReplaceDate.trim());
+  if (isNaN(d.getTime())) return '교체필요';
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diff = Math.floor((today.getTime() - d.getTime()) / 86400000);
+  if (diff >= 365) return '교체필요';
+  if (diff >= 300) return '교체임박';
+  return '정상';
 }
 
 /* ─────────────────────────────────────────
@@ -115,7 +116,7 @@ function useZoomPan(
 }
 
 /* ─────────────────────────────────────────
-   핀 편집 모달
+   스타일 상수
 ───────────────────────────────────────── */
 const INPUT_CLS = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
 const LABEL_CLS = 'block text-xs font-semibold text-gray-500 mb-1';
@@ -131,6 +132,9 @@ interface BfFormMap {
   lastReplaceDate: string;
 }
 
+/* ─────────────────────────────────────────
+   핀 수정 모달
+───────────────────────────────────────── */
 function PinEditModal({
   item, onSave, onClose, onRemove,
 }: {
@@ -152,6 +156,7 @@ function PinEditModal({
   const set = (k: keyof BfFormMap, v: string) => setForm(f => ({ ...f, [k]: v }));
 
   const handleSave = () => {
+    if (!form.facilityName.trim()) { alert('시설명을 입력하세요.'); return; }
     onSave({
       ...item,
       outletSeq:       Number(form.outletSeq) || 0,
@@ -165,13 +170,19 @@ function PinEditModal({
     });
   };
 
+  const statusColor = getPinColor(item);
+  const statusLabel = getReplaceLabel(item);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.55)' }} onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-[460px] max-w-[95vw] overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-[480px] max-w-[95vw] overflow-hidden" onClick={e => e.stopPropagation()}>
         {/* 헤더 */}
         <div className="flex items-center justify-between px-5 py-4 bg-blue-600">
           <div>
-            <p className="text-xs text-blue-200 font-mono">배출구번호 #{item.id}</p>
+            <div className="flex items-center gap-2">
+              <p className="text-xs text-blue-200 font-mono">배출구번호 #{item.id}</p>
+              <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: statusColor, color: 'white' }}>{statusLabel}</span>
+            </div>
             <h2 className="text-base font-bold text-white mt-0.5">백필터 정보 수정</h2>
           </div>
           <button onClick={onClose} className="text-blue-200 hover:text-white transition">
@@ -229,7 +240,11 @@ function PinEditModal({
             </svg>
             저장
           </button>
-          <button onClick={onRemove} title="도면에서 제거" className="px-3 py-2.5 text-red-400 hover:text-red-600 hover:bg-red-50 border border-red-200 rounded-xl text-sm transition">
+          <button
+            onClick={onRemove}
+            title="도면에서 제거"
+            className="px-3 py-2.5 text-red-400 hover:text-red-600 hover:bg-red-50 border border-red-200 rounded-xl text-sm transition"
+          >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2"/>
             </svg>
@@ -242,15 +257,13 @@ function PinEditModal({
 }
 
 /* ─────────────────────────────────────────
-   신규 핀 추가 모달 (도면에서 클릭 시)
+   신규 핀 추가 모달 (도면 클릭 시)
 ───────────────────────────────────────── */
 function PinAddModal({
-  floor,
   pendingRatio,
   onSave,
   onClose,
 }: {
-  floor: FloorDef;
   pendingRatio: { x: number; y: number };
   onSave: (bf: BagFilter) => void;
   onClose: () => void;
@@ -275,20 +288,20 @@ function PinAddModal({
       material:        form.material.trim(),
       prevReplaceDate: form.prevReplaceDate.trim(),
       lastReplaceDate: form.lastReplaceDate.trim(),
-      mapX: pendingRatio.x,
-      mapY: pendingRatio.y,
-      floor: floor.id,
+      mapX:  pendingRatio.x,
+      mapY:  pendingRatio.y,
+      floor: 'factory',
     };
     onSave(bf);
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.55)' }} onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-[460px] max-w-[95vw] overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-[480px] max-w-[95vw] overflow-hidden" onClick={e => e.stopPropagation()}>
         {/* 헤더 */}
         <div className="flex items-center justify-between px-5 py-4 bg-blue-600">
           <div>
-            <p className="text-xs text-blue-200">{floor.label} 도면 위치 지정 완료</p>
+            <p className="text-xs text-blue-200">공장 도면 위치 지정 완료</p>
             <h2 className="text-base font-bold text-white mt-0.5">백필터 정보 입력</h2>
           </div>
           <button onClick={onClose} className="text-blue-200 hover:text-white transition">
@@ -368,69 +381,72 @@ function PinAddModal({
 }
 
 /* ─────────────────────────────────────────
-   FloorView — 핀 찍기 + 드래그 이동
+   메인 BagFilterMapView
+   — 공장 항공사진 위에 핀 직접 추가/편집/드래그
 ───────────────────────────────────────── */
-function FloorView({
-  building,
-  floor,
-  onBack,
-  onFloorChange,
-}: {
-  building: string;
-  floor: FloorDef;
-  onBack: () => void;
-  onFloorChange: (f: FloorDef) => void;
-}) {
+export default function BagFilterMapView() {
   const canvasRef = useRef<HTMLDivElement>(null);
-  const { scale, offset, setOffset, clampOffset, handleWheel } = useZoomPan(canvasRef, floor.imgW, floor.imgH);
+  const { scale, offset, setOffset, clampOffset, handleWheel } = useZoomPan(
+    canvasRef, FACTORY_IMG_W, FACTORY_IMG_H
+  );
 
-  const [pins, setPins]         = useState<BagFilter[]>([]);
-  const [addMode, setAddMode]   = useState(false);       // 핀 추가 모드
-  const [pendingRatio, setPendingRatio] = useState<{ x: number; y: number } | null>(null);
-  const [editPin, setEditPin]   = useState<BagFilter | null>(null);
+  const [pins, setPins]                   = useState<BagFilter[]>([]);
+  const [addMode, setAddMode]             = useState(false);
+  const [pendingRatio, setPendingRatio]   = useState<{ x: number; y: number } | null>(null);
+  const [editPin, setEditPin]             = useState<BagFilter | null>(null);
 
-  // 드래그 이동
-  const draggingPin   = useRef<string | null>(null);
-  const dragStartPos  = useRef<{ cx: number; cy: number }>({ cx: 0, cy: 0 });
-  const dragStartRatio= useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const didDragPin    = useRef(false);
+  /* 드래그 이동 refs */
+  const draggingPin    = useRef<string | null>(null);
+  const dragStartPos   = useRef({ cx: 0, cy: 0 });
+  const didDragPin     = useRef(false);
 
-  // 화면 팬
-  const isPanning    = useRef(false);
-  const panStart     = useRef({ cx: 0, cy: 0, ox: 0, oy: 0 });
-  const didPan       = useRef(false);
+  /* 화면 팬 refs */
+  const isPanning      = useRef(false);
+  const panStart       = useRef({ cx: 0, cy: 0, ox: 0, oy: 0 });
+  const didPan         = useRef(false);
 
+  /* ESC 키 → 추가 모드 취소 */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setAddMode(false); setPendingRatio(null); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  /* 핀 목록 로드 — floor='factory' 기준 */
   const loadPins = useCallback(async () => {
-    const list = await getBagFiltersOnFloor(floor.id);
-    setPins(list);
-  }, [floor.id]);
+    const all = await getAllBagFilters();
+    // floor가 'factory' 이거나 mapX/mapY가 있는 항목만 표시
+    setPins(all.filter(bf => bf.mapX !== undefined && bf.mapY !== undefined && bf.floor === 'factory'));
+  }, []);
 
   useEffect(() => { loadPins(); }, [loadPins]);
 
-  /* 이미지 → 비율 좌표 변환 */
+  /* 클라이언트 좌표 → 이미지 비율 좌표 */
   const clientToRatio = useCallback((cx: number, cy: number): { x: number; y: number } | null => {
     const el = canvasRef.current;
     if (!el) return null;
     const rect = el.getBoundingClientRect();
     const mx = cx - rect.left - rect.width  / 2;
     const my = cy - rect.top  - rect.height / 2;
-    const ix = (mx - offset.x) / scale + floor.imgW / 2;
-    const iy = (my - offset.y) / scale + floor.imgH / 2;
-    if (ix < 0 || ix > floor.imgW || iy < 0 || iy > floor.imgH) return null;
-    return { x: ix / floor.imgW, y: iy / floor.imgH };
-  }, [offset, scale, floor.imgW, floor.imgH]);
+    const ix = (mx - offset.x) / scale + FACTORY_IMG_W / 2;
+    const iy = (my - offset.y) / scale + FACTORY_IMG_H / 2;
+    if (ix < 0 || ix > FACTORY_IMG_W || iy < 0 || iy > FACTORY_IMG_H) return null;
+    return { x: ix / FACTORY_IMG_W, y: iy / FACTORY_IMG_H };
+  }, [offset, scale]);
 
-  /* ── 캔버스 mousedown: 팬 또는 핀 추가 준비 ── */
+  /* ── 캔버스 이벤트 ── */
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
-    if (addMode) return; // 추가 모드에서는 팬 비활성
+    if (addMode) return;
     isPanning.current = true;
     didPan.current    = false;
     panStart.current  = { cx: e.clientX, cy: e.clientY, ox: offset.x, oy: offset.y };
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent) => {
-    // 핀 드래그
+    /* 핀 드래그 */
     if (draggingPin.current) {
       const dx = e.clientX - dragStartPos.current.cx;
       const dy = e.clientY - dragStartPos.current.cy;
@@ -445,7 +461,7 @@ function FloorView({
       }
       return;
     }
-    // 팬
+    /* 팬 */
     if (isPanning.current) {
       const dx = e.clientX - panStart.current.cx;
       const dy = e.clientY - panStart.current.cy;
@@ -457,25 +473,25 @@ function FloorView({
   };
 
   const handleCanvasMouseUp = async (e: React.MouseEvent) => {
-    // 핀 드래그 종료
+    /* 핀 드래그 종료 → 위치 저장 */
     if (draggingPin.current) {
       const id = draggingPin.current;
       draggingPin.current = null;
       if (didDragPin.current) {
         const pin = pins.find(p => p.id === id);
-        if (pin?.mapX !== undefined && pin?.mapY !== undefined && pin.floor) {
-          await saveBagFilterPosition(id, pin.floor, pin.mapX, pin.mapY);
+        if (pin?.mapX !== undefined && pin?.mapY !== undefined) {
+          await saveBagFilterPosition(id, 'factory', pin.mapX, pin.mapY);
         }
       }
       didDragPin.current = false;
       return;
     }
-    // 팬 종료
+    /* 팬 종료 */
     if (isPanning.current) {
       isPanning.current = false;
       if (didPan.current) { didPan.current = false; return; }
     }
-    // 핀 추가 모드 클릭
+    /* 핀 추가 모드 클릭 → 좌표 저장 후 모달 오픈 */
     if (addMode) {
       const r = clientToRatio(e.clientX, e.clientY);
       if (r) {
@@ -485,101 +501,105 @@ function FloorView({
     }
   };
 
-  /* 핀 저장 (추가) */
-  const handleAddSave = async (bf: BagFilter) => {
-    try {
-      await addBagFilter(bf);
-    } catch {
-      // 이미 존재하는 경우 위치만 덮어쓰기
-      const existing = pins.find(p => p.id === bf.id);
-      if (existing) {
-        await saveBagFilterPosition(bf.id, bf.floor!, bf.mapX!, bf.mapY!);
-      } else {
-        alert('저장 실패');
-        setPendingRatio(null);
-        return;
-      }
-    }
-    setPendingRatio(null);
-    loadPins();
-  };
-
-  /* 핀 수정 저장 */
-  const handleEditSave = async (updated: BagFilter) => {
-    await updateBagFilter(updated);
-    setEditPin(null);
-    loadPins();
-  };
-
-  /* 핀 도면에서 제거 */
-  const handleRemovePin = async (id: string) => {
-    await removeBagFilterPosition(id);
-    setEditPin(null);
-    loadPins();
-  };
-
-  /* 핀 mousedown: 드래그 시작 */
+  /* 핀 mousedown → 드래그 시작 */
   const handlePinMouseDown = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     draggingPin.current  = id;
     dragStartPos.current = { cx: e.clientX, cy: e.clientY };
-    const pin = pins.find(p => p.id === id);
-    dragStartRatio.current = { x: pin?.mapX ?? 0, y: pin?.mapY ?? 0 };
-    didDragPin.current = false;
+    didDragPin.current   = false;
   };
 
-  /* 핀 click: 편집 모달 (드래그 아니었을 때만) */
+  /* 핀 click → 수정 모달 (드래그가 아닌 경우만) */
   const handlePinClick = (e: React.MouseEvent, pin: BagFilter) => {
     e.stopPropagation();
     if (didDragPin.current) return;
     setEditPin(pin);
   };
 
-  const floors = BUILDING_FLOORS[building] ?? [];
+  /* 저장 — 신규 추가 */
+  const handleAddSave = async (bf: BagFilter) => {
+    try {
+      await addBagFilter(bf);
+    } catch {
+      await saveBagFilterPosition(bf.id, 'factory', bf.mapX!, bf.mapY!);
+    }
+    setPendingRatio(null);
+    loadPins();
+  };
+
+  /* 저장 — 수정 */
+  const handleEditSave = async (updated: BagFilter) => {
+    await updateBagFilter(updated);
+    setEditPin(null);
+    loadPins();
+  };
+
+  /* 도면에서 핀 제거 */
+  const handleRemovePin = async (id: string) => {
+    await removeBagFilterPosition(id);
+    setEditPin(null);
+    loadPins();
+  };
+
+  /* 상태별 카운트 */
+  const countByStatus = pins.reduce(
+    (acc, bf) => {
+      const lbl = getReplaceLabel(bf);
+      if (lbl === '교체필요') acc.replace++;
+      else if (lbl === '교체임박') acc.soon++;
+      else acc.ok++;
+      return acc;
+    },
+    { ok: 0, soon: 0, replace: 0 }
+  );
 
   return (
     <div className="flex flex-col h-full">
-      {/* 상단 툴바 */}
-      <div className="flex items-center gap-3 px-4 py-2.5 bg-white border-b border-gray-200 shrink-0">
-        {/* 뒤로 */}
-        <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition font-medium">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7"/>
+      {/* ── 상단 툴바 ── */}
+      <div className="flex items-center gap-3 px-4 py-2.5 bg-white border-b border-gray-200 shrink-0 flex-wrap">
+        {/* 타이틀 */}
+        <span className="text-sm font-bold text-gray-700 flex items-center gap-1.5">
+          <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
           </svg>
-          조감도
-        </button>
+          공장 전체 도면
+        </span>
+
         <div className="h-4 w-px bg-gray-200" />
-        {/* 건물명 */}
-        <span className="text-sm font-semibold text-gray-700">{building}</span>
-        <div className="h-4 w-px bg-gray-200" />
-        {/* 층 탭 */}
-        <div className="flex gap-1">
-          {floors.map(f => (
-            <button
-              key={f.id}
-              onClick={() => onFloorChange(f)}
-              className={[
-                'px-3 py-1 rounded-md text-xs font-semibold transition',
-                f.id === floor.id
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-gray-500 hover:bg-gray-100',
-              ].join(' ')}
-            >
-              {f.label}
-            </button>
-          ))}
+
+        {/* 현황 뱃지 */}
+        <div className="flex items-center gap-2 text-xs">
+          <span className="flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100 text-gray-600 font-semibold">
+            전체 <b className="text-gray-800">{pins.length}</b>
+          </span>
+          <span className="flex items-center gap-1 px-2 py-1 rounded-full bg-green-50 text-green-700 font-semibold">
+            <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+            정상 <b>{countByStatus.ok}</b>
+          </span>
+          <span className="flex items-center gap-1 px-2 py-1 rounded-full bg-amber-50 text-amber-700 font-semibold">
+            <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
+            교체임박 <b>{countByStatus.soon}</b>
+          </span>
+          <span className="flex items-center gap-1 px-2 py-1 rounded-full bg-red-50 text-red-700 font-semibold">
+            <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />
+            교체필요 <b>{countByStatus.replace}</b>
+          </span>
         </div>
+
         <div className="flex-1" />
+
         {/* 범례 */}
-        <div className="hidden sm:flex items-center gap-3 text-xs text-gray-500">
-          {[['#22c55e','정상'],['#f59e0b','교체임박'],['#ef4444','교체필요']].map(([c,l]) => (
+        <div className="hidden md:flex items-center gap-3 text-xs text-gray-500">
+          {([['#22c55e','정상'],['#f59e0b','교체임박'],['#ef4444','교체필요']] as const).map(([c,l]) => (
             <span key={l} className="flex items-center gap-1">
               <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: c }} />
               {l}
             </span>
           ))}
         </div>
-        <div className="h-4 w-px bg-gray-200" />
+
+        <div className="h-4 w-px bg-gray-200 hidden md:block" />
+
         {/* 핀 추가 버튼 */}
         <button
           onClick={() => setAddMode(v => !v)}
@@ -593,14 +613,14 @@ function FloorView({
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4"/>
           </svg>
-          {addMode ? '클릭하여 핀 위치 지정' : '도면에서 추가'}
+          {addMode ? '위치 클릭하여 핀 추가' : '도면에서 추가'}
         </button>
       </div>
 
-      {/* 도면 영역 */}
+      {/* ── 도면 영역 ── */}
       <div
         ref={canvasRef}
-        className="flex-1 relative overflow-hidden bg-gray-800 select-none"
+        className="flex-1 relative overflow-hidden bg-gray-900 select-none"
         style={{ cursor: addMode ? 'crosshair' : (isPanning.current ? 'grabbing' : 'grab') }}
         onMouseDown={handleCanvasMouseDown}
         onMouseMove={handleCanvasMouseMove}
@@ -621,20 +641,28 @@ function FloorView({
             top: '50%', left: '50%',
             transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})`,
             transformOrigin: 'center center',
-            width: floor.imgW,
-            height: floor.imgH,
+            width: FACTORY_IMG_W,
+            height: FACTORY_IMG_H,
           }}
         >
-          <img src={floor.img} width={floor.imgW} height={floor.imgH} alt={floor.label} style={SHARP_IMG_STYLE} />
+          {/* 공장 항공사진 */}
+          <img
+            src={FACTORY_IMG}
+            width={FACTORY_IMG_W}
+            height={FACTORY_IMG_H}
+            alt="공장 전체 도면"
+            style={SHARP_IMG_STYLE}
+          />
 
-          {/* 핀 */}
+          {/* ── 핀 마커 ── */}
           {pins.map(pin => {
             if (pin.mapX === undefined || pin.mapY === undefined) return null;
-            const px = pin.mapX * floor.imgW;
-            const py = pin.mapY * floor.imgH;
+            const px    = pin.mapX * FACTORY_IMG_W;
+            const py    = pin.mapY * FACTORY_IMG_H;
             const color = getPinColor(pin);
             return (
-              <g key={pin.id}
+              <div
+                key={pin.id}
                 style={{
                   position: 'absolute',
                   left: px,
@@ -642,38 +670,85 @@ function FloorView({
                   transform: 'translate(-50%, -100%)',
                   cursor: 'grab',
                   zIndex: 10,
+                  userSelect: 'none',
                 }}
                 onMouseDown={e => handlePinMouseDown(e, pin.id)}
                 onClick={e => handlePinClick(e, pin)}
               >
-                {/* SVG 핀 */}
-                <svg width="28" height="36" viewBox="0 0 28 36" style={{ display: 'block', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))' }}>
-                  <path d="M14 2C8.477 2 4 6.477 4 12c0 7.5 10 22 10 22s10-14.5 10-22C24 6.477 19.523 2 14 2z" fill={color} stroke="white" strokeWidth="2"/>
-                  <circle cx="14" cy="12" r="4" fill="white" fillOpacity="0.9"/>
-                  <text x="14" y="16" textAnchor="middle" fontSize="7" fontWeight="bold" fill={color}>{pin.id}</text>
+                {/* 물방울 핀 SVG */}
+                <svg
+                  width="28" height="36"
+                  viewBox="0 0 28 36"
+                  style={{ display: 'block', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.5))' }}
+                >
+                  <path
+                    d="M14 2C8.477 2 4 6.477 4 12c0 7.5 10 22 10 22s10-14.5 10-22C24 6.477 19.523 2 14 2z"
+                    fill={color}
+                    stroke="white"
+                    strokeWidth="2"
+                  />
+                  <circle cx="14" cy="12" r="5" fill="white" fillOpacity="0.9"/>
+                  <text
+                    x="14" y="15.5"
+                    textAnchor="middle"
+                    fontSize="6"
+                    fontWeight="bold"
+                    fill={color}
+                    style={{ pointerEvents: 'none' }}
+                  >
+                    {pin.id}
+                  </text>
                 </svg>
-              </g>
+                {/* 툴팁 라벨 (hover) */}
+                <div style={{
+                  position: 'absolute',
+                  bottom: '100%',
+                  left: '50%',
+                  transform: 'translateX(-50%) translateY(-2px)',
+                  whiteSpace: 'nowrap',
+                  background: 'rgba(0,0,0,0.75)',
+                  color: 'white',
+                  fontSize: 10,
+                  padding: '2px 6px',
+                  borderRadius: 4,
+                  pointerEvents: 'none',
+                  opacity: 0,
+                  transition: 'opacity 0.15s',
+                }}
+                  className="pin-tooltip"
+                >
+                  #{pin.id} {pin.facilityName}
+                </div>
+              </div>
             );
           })}
         </div>
 
-        {/* 추가 모드 안내 오버레이 */}
+        {/* ── 추가 모드 안내 오버레이 ── */}
         {addMode && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-blue-600 text-white text-sm rounded-full shadow-lg pointer-events-none">
-            도면에서 백필터를 배치할 위치를 클릭하세요 — ESC로 취소
+          <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white text-sm rounded-full shadow-xl pointer-events-none">
+            <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+            </svg>
+            백필터를 배치할 위치를 클릭하세요 &nbsp;—&nbsp;
+            <span className="opacity-80 text-xs">ESC로 취소</span>
           </div>
         )}
 
-        {/* 핀 개수 뱃지 */}
-        <div className="absolute top-3 left-3 px-2.5 py-1 bg-black/50 text-white text-xs rounded-full">
+        {/* ── 배치 카운트 뱃지 ── */}
+        <div className="absolute top-3 left-3 px-2.5 py-1 bg-black/50 text-white text-xs rounded-full pointer-events-none">
           {pins.length}개 배치됨
+        </div>
+
+        {/* ── 줌 안내 ── */}
+        <div className="absolute bottom-3 right-3 text-xs text-white/50 pointer-events-none select-none">
+          휠로 줌 · 드래그로 이동 · 핀 드래그로 위치 편집
         </div>
       </div>
 
-      {/* 모달 */}
+      {/* ── 모달 ── */}
       {pendingRatio && (
         <PinAddModal
-          floor={floor}
           pendingRatio={pendingRatio}
           onSave={handleAddSave}
           onClose={() => setPendingRatio(null)}
@@ -687,132 +762,11 @@ function FloorView({
           onRemove={() => handleRemovePin(editPin.id)}
         />
       )}
+
+      {/* ── 핀 hover 툴팁 CSS ── */}
+      <style>{`
+        div[style*="grab"]:hover .pin-tooltip { opacity: 1 !important; }
+      `}</style>
     </div>
   );
-}
-
-/* ─────────────────────────────────────────
-   AerialView — 조감도 (건물 선택)
-───────────────────────────────────────── */
-const AERIAL_W = 1024;
-const AERIAL_H = 768;
-
-const BUILDING_BUTTONS: { name: string; x: number; y: number }[] = [
-  { name: '관리동',    x: 0.25, y: 0.30 },
-  { name: '생산1동',   x: 0.48, y: 0.38 },
-  { name: '생산2동',   x: 0.60, y: 0.38 },
-  { name: '원료창고',  x: 0.70, y: 0.55 },
-  { name: '복지관',    x: 0.20, y: 0.55 },
-  { name: '제품창고',  x: 0.50, y: 0.60 },
-];
-
-function AerialView({ onSelect }: { onSelect: (building: string) => void }) {
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const { scale, offset, setOffset, clampOffset, handleWheel } = useZoomPan(canvasRef, AERIAL_W, AERIAL_H);
-
-  const isPanning = useRef(false);
-  const panStart  = useRef({ cx: 0, cy: 0, ox: 0, oy: 0 });
-  const didPan    = useRef(false);
-
-  return (
-    <div className="flex flex-col h-full">
-      {/* 안내 헤더 */}
-      <div className="px-4 py-2.5 bg-white border-b border-gray-200 flex items-center gap-2 shrink-0">
-        <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-        </svg>
-        <span className="text-sm text-gray-600">건물을 클릭하여 내부 도면을 확인하세요</span>
-      </div>
-      {/* 조감도 */}
-      <div
-        ref={canvasRef}
-        className="flex-1 relative overflow-hidden bg-gray-800 select-none"
-        style={{ cursor: isPanning.current ? 'grabbing' : 'grab' }}
-        onMouseDown={e => {
-          if (e.button !== 0) return;
-          isPanning.current = true; didPan.current = false;
-          panStart.current = { cx: e.clientX, cy: e.clientY, ox: offset.x, oy: offset.y };
-        }}
-        onMouseMove={e => {
-          if (!isPanning.current) return;
-          const dx = e.clientX - panStart.current.cx;
-          const dy = e.clientY - panStart.current.cy;
-          if (Math.hypot(dx, dy) > DRAG_THRESHOLD) didPan.current = true;
-          if (didPan.current) setOffset(clampOffset(panStart.current.ox + dx, panStart.current.oy + dy, scale));
-        }}
-        onMouseUp={() => { isPanning.current = false; }}
-        onMouseLeave={() => { isPanning.current = false; }}
-        onWheel={handleWheel}
-      >
-        <div style={{
-          position: 'absolute', top: '50%', left: '50%',
-          transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})`,
-          transformOrigin: 'center center',
-          width: AERIAL_W, height: AERIAL_H,
-        }}>
-          <img src="/factory-aerial.jpg" width={AERIAL_W} height={AERIAL_H} alt="공장 조감도" style={SHARP_IMG_STYLE} />
-          {/* 건물 버튼 */}
-          {BUILDING_BUTTONS.map(({ name, x, y }) => {
-            const hasFloors = !!BUILDING_FLOORS[name];
-            return (
-              <button
-                key={name}
-                disabled={!hasFloors}
-                onClick={e => { e.stopPropagation(); if (hasFloors && !didPan.current) onSelect(name); }}
-                style={{
-                  position: 'absolute',
-                  left: x * AERIAL_W,
-                  top:  y * AERIAL_H,
-                  transform: 'translate(-50%, -50%)',
-                  cursor: hasFloors ? 'pointer' : 'default',
-                }}
-                className={[
-                  'px-3 py-1.5 rounded-lg text-xs font-bold shadow-lg border transition',
-                  hasFloors
-                    ? 'bg-blue-600 text-white border-blue-400 hover:bg-blue-500 hover:scale-105'
-                    : 'bg-gray-600/70 text-gray-300 border-gray-500 cursor-default',
-                ].join(' ')}
-              >
-                {name}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ─────────────────────────────────────────
-   메인 BagFilterMapView
-───────────────────────────────────────── */
-export default function BagFilterMapView() {
-  const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null);
-  const [selectedFloor, setSelectedFloor]       = useState<FloorDef | null>(null);
-
-  const handleBuildingSelect = (name: string) => {
-    const floors = BUILDING_FLOORS[name];
-    if (!floors?.length) return;
-    setSelectedBuilding(name);
-    setSelectedFloor(floors[0]);
-  };
-
-  const handleBack = () => {
-    setSelectedBuilding(null);
-    setSelectedFloor(null);
-  };
-
-  if (selectedBuilding && selectedFloor) {
-    return (
-      <FloorView
-        key={selectedFloor.id}
-        building={selectedBuilding}
-        floor={selectedFloor}
-        onBack={handleBack}
-        onFloorChange={setSelectedFloor}
-      />
-    );
-  }
-
-  return <AerialView onSelect={handleBuildingSelect} />;
 }
