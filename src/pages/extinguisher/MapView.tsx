@@ -223,8 +223,21 @@ function EditModal({
               <option>정상</option>
               <option>점검필요</option>
               <option>교체대상</option>
+              <option>불량</option>
               <option>폐기</option>
             </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">
+              교체 년월
+              <span className="text-gray-400 font-normal ml-1">(미입력 시 제조+10년 자동)</span>
+            </label>
+            <input
+              type="month"
+              value={form.replaceDate ?? ''}
+              onChange={e => set('replaceDate', e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-purple-400"
+            />
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1">비고</label>
@@ -273,6 +286,7 @@ interface NewExtinguisherForm {
   location: string;
   type: string;
   mfgDate: string;
+  replaceDate: string;
   lastCheckDate: string;
   manager: string;
   status: string;
@@ -295,6 +309,7 @@ function AddModal({
     location: '',
     type: 'ABC 분말 3.3kg',
     mfgDate: '',
+    replaceDate: '',
     lastCheckDate: today,
     manager: '',
     status: '정상',
@@ -314,6 +329,7 @@ function AddModal({
       location: form.location,
       type: form.type,
       mfgDate: form.mfgDate,
+      replaceDate: form.replaceDate.trim() || undefined,
       lastCheckDate: form.lastCheckDate,
       manager: form.manager,
       status: form.status as ExtinguisherStatus,
@@ -411,6 +427,18 @@ function AddModal({
             </div>
           </div>
           <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">
+              교체 년월
+              <span className="text-gray-400 font-normal ml-1">(미입력 시 제조+10년 자동)</span>
+            </label>
+            <input
+              type="month"
+              value={form.replaceDate}
+              onChange={e => set('replaceDate', e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-purple-400"
+            />
+          </div>
+          <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1">담당자</label>
             <input
               value={form.manager}
@@ -429,6 +457,7 @@ function AddModal({
               <option>정상</option>
               <option>점검필요</option>
               <option>교체대상</option>
+              <option>불량</option>
               <option>폐기</option>
             </select>
           </div>

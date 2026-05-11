@@ -142,7 +142,8 @@ const STATUS_OPTIONS: { value: ExtinguisherStatus; label: string }[] = [
   { value: '정상',    label: '정상' },
   { value: '점검필요', label: '점검필요' },
   { value: '교체대상', label: '교체대상' },
-  { value: '폐기',    label: '폐기 (불량)' },
+  { value: '불량',    label: '불량' },
+  { value: '폐기',    label: '폐기 (레거시)' },
 ];
 
 /* ═══════════════════════════════════════════
@@ -152,6 +153,7 @@ interface AddForm {
   location: string;
   type: string;
   mfgDate: string;
+  replaceDate: string;
   lastCheckDate: string;
   manager: string;
   status: ExtinguisherStatus;
@@ -163,6 +165,7 @@ function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
     location:      '',
     type:          FE_TYPES[0],
     mfgDate:       '',
+    replaceDate:   '',
     lastCheckDate: '',
     manager:       '',
     status:        '정상',
@@ -182,6 +185,7 @@ function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
       location:      form.location.trim(),
       type:          form.type,
       mfgDate:       finalMfgDate,
+      replaceDate:   form.replaceDate.trim() || undefined,
       lastCheckDate: form.lastCheckDate,
       manager:       form.manager.trim(),
       status:        form.status,
@@ -250,6 +254,17 @@ function AddModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
               onBlur={e => set('mfgDate', formatMfgDate(e.target.value))}
               className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               placeholder="예) 202408 또는 2024-08" maxLength={7}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">
+              교체 년월
+              <span className="text-gray-400 font-normal ml-1">(미입력 시 제조년월+10년 자동)</span>
+            </label>
+            <input
+              type="month" value={form.replaceDate}
+              onChange={e => set('replaceDate', e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
             />
           </div>
           <div>
@@ -634,6 +649,7 @@ interface EditForm {
   location: string;
   type: string;
   mfgDate: string;
+  replaceDate: string;
   manager: string;
   lastCheckDate: string;
   status: ExtinguisherStatus;
@@ -651,6 +667,7 @@ function EditModal({
     location:      item.location,
     type:          item.type,
     mfgDate:       item.mfgDate,
+    replaceDate:   item.replaceDate ?? '',
     manager:       item.manager,
     lastCheckDate: item.lastCheckDate,
     status:        item.status,
@@ -671,6 +688,7 @@ function EditModal({
       location:      form.location.trim(),
       type:          form.type.trim(),
       mfgDate:       finalMfgDate,
+      replaceDate:   form.replaceDate.trim() || undefined,
       manager:       form.manager.trim(),
       lastCheckDate: form.lastCheckDate,
       status:        form.status,
@@ -733,6 +751,15 @@ function EditModal({
               onBlur={e => set('mfgDate', formatMfgDate(e.target.value))}
               className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               placeholder="예) 202408 또는 2024-08" maxLength={7} />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">
+              교체 년월
+              <span className="text-gray-400 font-normal ml-1">(미입력 시 제조년월+10년 자동)</span>
+            </label>
+            <input type="month" value={form.replaceDate}
+              onChange={e => set('replaceDate', e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">담당자</label>
@@ -855,8 +882,8 @@ export default function ListView() {
         : false;
       return {
         ...item,
-        computedStatus: calcStatus(item.mfgDate, item.lastCheckDate, item.status, hasAbnormal),
-        replaceMonth:   calcReplaceMonth(item.mfgDate),
+        computedStatus: calcStatus(item.mfgDate, item.lastCheckDate, item.status, hasAbnormal, item.replaceDate),
+        replaceMonth:   calcReplaceMonth(item.mfgDate, item.replaceDate),
         no:             idx + 1,
       };
     });
