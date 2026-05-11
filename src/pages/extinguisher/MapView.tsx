@@ -1242,11 +1242,139 @@ function imgDist(a: Point, b: Point, W: number, H: number) {
 }
 
 /* ─────────────────────────────────────────
+   층별 선택 팝업 (FloorSelectPopup)
+   건물 클릭 시 폴리곤 위에 오버레이로 표시
+───────────────────────────────────────── */
+function FloorSelectPopup({
+  poly,
+  floors,
+  anchorPx,   // 팝업 위치 (이미지 픽셀 좌표)
+  scale,
+  offset,
+  canvasSize,
+  onSelect,
+  onClose,
+}: {
+  poly: BuildingPolygon;
+  floors: FloorDef[];
+  anchorPx: { x: number; y: number };
+  scale: number;
+  offset: { x: number; y: number };
+  canvasSize: { w: number; h: number };
+  onSelect: (floor: FloorDef) => void;
+  onClose: () => void;
+}) {
+  // 이미지 픽셀 좌표 → 캔버스 화면 좌표
+  const screenX = canvasSize.w / 2 + offset.x + (anchorPx.x - AERIAL_W / 2) * scale;
+  const screenY = canvasSize.h / 2 + offset.y + (anchorPx.y - AERIAL_H / 2) * scale;
+
+  const hasFloors = floors.length > 0;
+
+  return (
+    <div
+      className="absolute z-30 pointer-events-none"
+      style={{ left: screenX, top: screenY, transform: 'translate(-50%, -120%)' }}
+    >
+      <div
+        className="pointer-events-auto bg-white rounded-2xl shadow-2xl overflow-hidden"
+        style={{
+          border: `2px solid ${poly.color}`,
+          minWidth: 200,
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* 헤더 */}
+        <div
+          className="flex items-center justify-between px-4 py-3"
+          style={{ background: poly.color }}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-lg">🏢</span>
+            <div>
+              <p className="text-white font-bold text-sm leading-tight">{poly.name}</p>
+              <p className="text-white/70 text-[10px]">
+                {hasFloors ? '층을 선택하세요' : '도면 미등록'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-white/70 hover:text-white transition-colors w-6 h-6 flex items-center justify-center rounded-full hover:bg-white/20"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        {/* 층 버튼 목록 */}
+        {hasFloors ? (
+          <div className="p-2 flex flex-col gap-1">
+            {/* 전체 버튼 */}
+            <button
+              onClick={() => onSelect(floors[0])}
+              className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-700 hover:text-white transition-all group"
+              style={{}}
+              onMouseEnter={e => (e.currentTarget.style.background = poly.color)}
+              onMouseLeave={e => (e.currentTarget.style.background = '')}
+            >
+              <span className="text-base">📋</span>
+              <span>전체 보기</span>
+              <svg className="w-4 h-4 ml-auto text-gray-300 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/>
+              </svg>
+            </button>
+            {/* 층별 버튼 */}
+            {floors.map((f, i) => (
+              <button
+                key={f.id}
+                onClick={() => onSelect(f)}
+                className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-700 hover:text-white transition-all group"
+                onMouseEnter={e => (e.currentTarget.style.background = poly.color)}
+                onMouseLeave={e => (e.currentTarget.style.background = '')}
+              >
+                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-gray-100 group-hover:bg-white/20 flex items-center justify-center text-xs font-black" style={{ color: poly.color }}>
+                  {i + 1}
+                </span>
+                <span>{f.label}</span>
+                <svg className="w-4 h-4 ml-auto text-gray-300 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/>
+                </svg>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="px-4 py-4 text-center">
+            <p className="text-xs text-gray-400">아직 층 도면이 등록되지 않았습니다.</p>
+            <p className="text-[10px] text-gray-300 mt-1">관리자에게 문의하세요.</p>
+          </div>
+        )}
+
+        {/* 꼬리 삼각형 */}
+        <div
+          className="absolute left-1/2 -translate-x-1/2 w-0 h-0"
+          style={{
+            bottom: -10,
+            borderLeft: '10px solid transparent',
+            borderRight: '10px solid transparent',
+            borderTop: `10px solid ${poly.color}`,
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────
    조감도 뷰 (AerialView)
 ───────────────────────────────────────── */
-function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => void }) {
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const imgRef    = useRef<HTMLImageElement>(null);
+function AerialView({
+  onFloorSelect,
+}: {
+  onFloorSelect: (buildingName: string, floor: FloorDef) => void;
+}) {
+  const canvasRef  = useRef<HTMLDivElement>(null);
+  const imgRef     = useRef<HTMLImageElement>(null);
   const { containScale, scale, setScale, offset, setOffset, clampOffset, resetView, handleWheel }
     = useZoomPan(canvasRef, AERIAL_W, AERIAL_H);
 
@@ -1256,6 +1384,22 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
   const [cursorPt,   setCursorPt]   = useState<Point | null>(null);
   const [hoveredId,  setHoveredId]  = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // 클릭된 건물 팝업 상태
+  const [popupPoly,  setPopupPoly]  = useState<BuildingPolygon | null>(null);
+  // 캔버스 크기 (팝업 위치 계산용)
+  const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
+
+  // 캔버스 크기 추적
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      setCanvasSize({ w: el.clientWidth, h: el.clientHeight });
+    });
+    ro.observe(el);
+    setCanvasSize({ w: el.clientWidth, h: el.clientHeight });
+    return () => ro.disconnect();
+  }, []);
 
   const pointerDown = useRef<{ x: number; y: number } | null>(null);
   const didDrag     = useRef(false);
@@ -1332,19 +1476,7 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
     if (hoveredId  === id) setHoveredId(null);
   }, [selectedId, hoveredId]);
 
-  useEffect(() => {
-    const fn = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && drawMode) {
-        setDraft([]);
-        setCursorPt(null);
-        setDrawMode(false);
-      }
-    };
-    window.addEventListener('keydown', fn);
-    return () => window.removeEventListener('keydown', fn);
-  }, [drawMode]);
-
-  const toggleDraw = () => setDrawMode(p => { setDraft([]); setCursorPt(null); return !p; });
+  const toggleDraw = () => { setPopupPoly(null); setDrawMode(p => { setDraft([]); setCursorPt(null); return !p; }); };
 
   const focusPolygon = useCallback((poly: BuildingPolygon) => {
     setSelectedId(poly.id);
@@ -1359,12 +1491,9 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
     e.stopPropagation();
     if (didDrag.current) return;
     setSelectedId(poly.id);
-    if (BUILDING_FLOORS[poly.name]) {
-      onBuildingSelect(poly.name);
-    } else {
-      alert(`[${poly.name}]이(가) 선택되었습니다.\n이 건물은 아직 층 도면이 등록되지 않았습니다.`);
-    }
-  }, [drawMode, onBuildingSelect]);
+    // 기존에 같은 폴리곤 클릭 시 팝업 토글
+    setPopupPoly(prev => prev?.id === poly.id ? null : poly);
+  }, [drawMode]);
 
   const nearFirst = draft.length >= 3 && cursorPt !== null
     && imgDist(cursorPt, draft[0], AERIAL_W, AERIAL_H) < CLOSE_THRESHOLD;
@@ -1375,6 +1504,18 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
     height: AERIAL_H,
   };
 
+  // ESC로 팝업 닫기
+  useEffect(() => {
+    const fn = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setPopupPoly(null);
+        if (drawMode) { setDraft([]); setCursorPt(null); setDrawMode(false); }
+      }
+    };
+    window.addEventListener('keydown', fn);
+    return () => window.removeEventListener('keydown', fn);
+  }, [drawMode]);
+
   return (
     <div className="flex flex-col flex-1 min-w-0" style={{ height: '100%' }}>
       {/* 툴바 */}
@@ -1383,7 +1524,7 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
           <span className="text-sm font-semibold text-gray-700">🗺 공장 조감도</span>
           <span className="text-xs text-gray-400">· 태경BK 단양1공장</span>
           <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full border border-blue-200">
-            💡 건물 클릭 → 도면 보기
+            💡 건물 클릭 → 층 선택
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -1470,43 +1611,102 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
             pointerEvents: drawMode ? 'none' : 'auto',
           }}>
             {polygons.map(poly => {
-              const isHov      = hoveredId === poly.id || selectedId === poly.id;
-              const isSel      = selectedId === poly.id;
+              const isHov     = hoveredId === poly.id;
+              const isSel     = selectedId === poly.id && popupPoly?.id === poly.id;
               const { cx, cy } = centroid(poly.points, AERIAL_W, AERIAL_H);
-              const lw         = Math.min(Math.max(poly.name.length * 8 + 20, 64), 160);
-              const hasFloors  = !!BUILDING_FLOORS[poly.name];
+              const hasFloors = !!BUILDING_FLOORS[poly.name];
+              // 라벨 박스 너비
+              const lw        = Math.min(Math.max(poly.name.length * 9 + 28, 72), 180);
               return (
-                <g key={poly.id} style={{ cursor: 'pointer' }}
-                  onMouseEnter={() => setHoveredId(poly.id)}
+                <g
+                  key={poly.id}
+                  style={{ cursor: 'pointer' }}
+                  onMouseEnter={() => !drawMode && setHoveredId(poly.id)}
                   onMouseLeave={() => setHoveredId(null)}
                   onClick={e => onPolyClick(poly, e as unknown as React.MouseEvent)}
                 >
-                  <polygon points={toSvgPts(poly.points, AERIAL_W, AERIAL_H)}
-                    fill={poly.color} fillOpacity={isHov ? 0.52 : 0.28}
-                    stroke={poly.color} strokeWidth={isSel ? 3 : isHov ? 2.5 : 1.8}
-                    strokeLinejoin="round" strokeDasharray={isSel ? '8 3' : 'none'}
-                    style={{ transition: 'fill-opacity .12s, stroke-width .12s' }}/>
-                  {isSel && (
-                    <polygon points={toSvgPts(poly.points, AERIAL_W, AERIAL_H)}
-                      fill="none" stroke={poly.color} strokeWidth={6} strokeOpacity={0.25}
-                      strokeLinejoin="round" style={{ pointerEvents: 'none' }}/>
+                  {/* ── 기본 채우기 ── */}
+                  <polygon
+                    points={toSvgPts(poly.points, AERIAL_W, AERIAL_H)}
+                    fill={poly.color}
+                    fillOpacity={isSel ? 0.45 : isHov ? 0.38 : 0.18}
+                    stroke="none"
+                    style={{ transition: 'fill-opacity .15s' }}
+                  />
+
+                  {/* ── 호버/선택 시 흰색 외곽선 강조 ── */}
+                  {(isHov || isSel) && (
+                    <>
+                      {/* 외부 글로우 */}
+                      <polygon
+                        points={toSvgPts(poly.points, AERIAL_W, AERIAL_H)}
+                        fill="none"
+                        stroke={poly.color}
+                        strokeWidth={8}
+                        strokeOpacity={0.35}
+                        strokeLinejoin="round"
+                        style={{ pointerEvents: 'none' }}
+                      />
+                      {/* 흰색 선명 외곽선 */}
+                      <polygon
+                        points={toSvgPts(poly.points, AERIAL_W, AERIAL_H)}
+                        fill="none"
+                        stroke="white"
+                        strokeWidth={isSel ? 3 : 2.5}
+                        strokeLinejoin="round"
+                        strokeDasharray={isSel ? '10 4' : 'none'}
+                        style={{ pointerEvents: 'none' }}
+                      />
+                    </>
                   )}
+
+                  {/* ── 기본 선 (비호버) ── */}
+                  {!isHov && !isSel && (
+                    <polygon
+                      points={toSvgPts(poly.points, AERIAL_W, AERIAL_H)}
+                      fill="none"
+                      stroke={poly.color}
+                      strokeWidth={1.5}
+                      strokeLinejoin="round"
+                      strokeOpacity={0.7}
+                      style={{ pointerEvents: 'none' }}
+                    />
+                  )}
+
+                  {/* ── 건물명 라벨 ── */}
                   <g style={{ pointerEvents: 'none' }}>
-                    <rect x={cx - lw / 2} y={cy - 13} width={lw} height={26} rx={7}
-                      fill={isHov ? poly.color : 'rgba(0,0,0,0.68)'}
-                      style={{ transition: 'fill .12s' }}/>
-                    <text x={cx} y={cy + 5} textAnchor="middle"
-                      fontSize={12} fontWeight="700" fill="white"
-                      fontFamily="-apple-system,'Malgun Gothic',sans-serif">
-                      {poly.name}{hasFloors ? ' 🏢' : ''}
+                    {/* 라벨 배경 */}
+                    <rect
+                      x={cx - lw / 2} y={cy - 14} width={lw} height={28} rx={8}
+                      fill={isHov || isSel ? poly.color : 'rgba(0,0,0,0.72)'}
+                      stroke={isHov || isSel ? 'white' : 'none'}
+                      strokeWidth={1.5}
+                      style={{ transition: 'fill .15s', filter: isHov ? `drop-shadow(0 2px 8px ${poly.color}88)` : 'none' }}
+                    />
+                    {/* 건물명 텍스트 */}
+                    <text
+                      x={cx} y={cy + 1}
+                      textAnchor="middle"
+                      dominantBaseline="middle"
+                      fontSize={isHov || isSel ? 13 : 11.5}
+                      fontWeight="700"
+                      fill="white"
+                      fontFamily="-apple-system,'Malgun Gothic',sans-serif"
+                      style={{ transition: 'font-size .1s' }}
+                    >
+                      {hasFloors ? '🏢 ' : ''}{poly.name}
                     </text>
                   </g>
+
+                  {/* ── 호버 시 삭제 버튼 ── */}
                   {isHov && !drawMode && (
-                    <g style={{ cursor: 'pointer' }}
-                      onClick={e => { e.stopPropagation(); handleDelete(poly.id); }}>
-                      <circle cx={cx + lw / 2 + 2} cy={cy - 13} r={7} fill="#ef4444"/>
-                      <text x={cx + lw / 2 + 2} y={cy - 9} textAnchor="middle"
-                        fontSize={9} fill="white" fontWeight="bold">✕</text>
+                    <g
+                      style={{ cursor: 'pointer' }}
+                      onClick={e => { e.stopPropagation(); handleDelete(poly.id); }}
+                    >
+                      <circle cx={cx + lw / 2 + 4} cy={cy - 14} r={8} fill="#ef4444" stroke="white" strokeWidth={1.5}/>
+                      <text x={cx + lw / 2 + 4} y={cy - 10} textAnchor="middle"
+                        fontSize={10} fill="white" fontWeight="bold">✕</text>
                     </g>
                   )}
                 </g>
@@ -1554,12 +1754,37 @@ function AerialView({ onBuildingSelect }: { onBuildingSelect: (name: string) => 
           </svg>
         </div>
 
+        {/* ── 층별 선택 팝업 ── */}
+        {popupPoly && (
+          <FloorSelectPopup
+            poly={popupPoly}
+            floors={BUILDING_FLOORS[popupPoly.name] ?? []}
+            anchorPx={(() => { const { cx, cy } = centroid(popupPoly.points, AERIAL_W, AERIAL_H); return { x: cx, y: cy }; })()}
+            scale={scale}
+            offset={offset}
+            canvasSize={canvasSize}
+            onSelect={floor => {
+              setPopupPoly(null);
+              onFloorSelect(popupPoly.name, floor);
+            }}
+            onClose={() => { setPopupPoly(null); setSelectedId(null); }}
+          />
+        )}
+
+        {/* 캔버스 클릭 시 팝업 닫기 (배경 클릭) */}
+        {popupPoly && (
+          <div
+            className="absolute inset-0 z-20"
+            onClick={() => { setPopupPoly(null); setSelectedId(null); }}
+          />
+        )}
+
         <div className="absolute bottom-4 left-4 text-white/55 text-xs rounded-lg px-2.5 py-1.5 pointer-events-none"
-          style={{ background: 'rgba(0,0,0,0.38)', zIndex: 20 }}>
-          🖱 휠: 줌 · 드래그: 이동 · ESC: 취소
+          style={{ background: 'rgba(0,0,0,0.38)', zIndex: 40 }}>
+          🖱 휠: 줌 · 드래그: 이동 · 건물 클릭: 층 선택
         </div>
         <div className="absolute top-3 left-3 text-white/50 text-xs font-mono rounded px-2 py-1 pointer-events-none"
-          style={{ background: 'rgba(0,0,0,0.32)', zIndex: 20 }}>
+          style={{ background: 'rgba(0,0,0,0.32)', zIndex: 40 }}>
           ×{scale.toFixed(2)}
         </div>
       </div>
@@ -1575,13 +1800,10 @@ export default function MapView() {
   const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null);
   const [selectedFloor,    setSelectedFloor]    = useState<FloorDef | null>(null);
 
-  /* 건물 클릭 → 첫 번째 층으로 진입 */
-  const handleBuildingSelect = useCallback((buildingName: string) => {
-    const floors = BUILDING_FLOORS[buildingName];
-    if (floors && floors.length > 0) {
-      setSelectedBuilding(buildingName);
-      setSelectedFloor(floors[0]);
-    }
+  /* 팝업에서 층 선택 → FloorView 진입 */
+  const handleFloorSelect = useCallback((buildingName: string, floor: FloorDef) => {
+    setSelectedBuilding(buildingName);
+    setSelectedFloor(floor);
   }, []);
 
   /* 층 탭 전환 */
@@ -1606,7 +1828,7 @@ export default function MapView() {
           onFloorChange={handleFloorChange}
         />
       ) : (
-        <AerialView onBuildingSelect={handleBuildingSelect} />
+        <AerialView onFloorSelect={handleFloorSelect} />
       )}
     </div>
   );
