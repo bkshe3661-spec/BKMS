@@ -9,24 +9,12 @@ export default function App() {
   const [activeGnb, setActiveGnb] = useState<GnbTab>('extinguisher');
   const [activeLnb, setActiveLnb] = useState<ExtinguisherLnbTab>('map');
 
-  /** 헤더 "+ 소화기 추가" 버튼 → 공장 도면 탭으로 이동 */
-  const handleHeaderAdd = () => {
-    setActiveGnb('extinguisher');
-    setActiveLnb('map');
-  };
-
-  /** ListView 내 "+ 소화기 추가" 버튼 → 공장 도면 탭으로 이동 */
-  const handleGoToMap = () => {
-    setActiveLnb('map');
-  };
-
   return (
     <div className="min-h-screen flex flex-col bg-gray-100">
       {/* 헤더 + GNB */}
       <Header
         activeGnb={activeGnb}
         onGnbChange={setActiveGnb}
-        onAdd={handleHeaderAdd}
       />
 
       {/* 소화기 탭일 때만 LNB 노출 */}
@@ -39,7 +27,7 @@ export default function App() {
         {activeGnb === 'extinguisher' && (
           activeLnb === 'map'
             ? <MapView />
-            : <ListView onGoToMap={handleGoToMap} />
+            : <ListView />
         )}
         {activeGnb === 'bagfilter' && (
           <div className="flex items-center justify-center h-full py-32 text-gray-400">

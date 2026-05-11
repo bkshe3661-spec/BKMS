@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { getAllExtinguishers, updateExtinguisher, deleteExtinguisher } from '../../services/extinguisherService';
+import { addNewExtinguisher, getNextExtinguisherId } from '../../services/floorPlanService';
 import { calcStatus, calcReplaceMonth } from '../../utils/statusCalc';
-import type { Extinguisher } from '../../types/extinguisher';
+import type { Extinguisher, ExtinguisherStatus } from '../../types/extinguisher';
 import type { ComputedStatus } from '../../utils/statusCalc';
 
 /* ─────────────────────────────────────────
@@ -26,8 +27,9 @@ const CHECK_ITEMS = [
 ] as const;
 
 /* ─────────────────────────────────────────
-   요약 카드 정의 — key는 반드시 고유해야 단일 선택 동작
-   '불량'은 현재 미구현 상태로 별도 key 부여
+   요약 카드 정의
+   - key 반드시 고유 → 단일 선택 동작 보장
+   - '불량' 카드: 클릭 무시(필터 없음), disabled 제거 → 일반 표시 카드
 ───────────────────────────────────────── */
 type SummaryKey = '전체' | '양호' | '점검필요' | '교체대상' | '불량';
 
@@ -115,6 +117,209 @@ function todayStr(): string {
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
+}
+
+/* ═══════════════════════════════════════════
+   소화기 추가 모달
+═══════════════════════════════════════════ */
+interface AddForm {
+  location: string;
+  type: string;
+  mfgDate: string;
+  lastCheckDate: string;
+  manager: string;
+  status: ExtinguisherStatus;
+  note: string;
+}
+
+const STATUS_OPTIONS: { value: ExtinguisherStatus; label: string }[] = [
+  { value: '정상',   label: '정상' },
+  { value: '점검필요', label: '점검필요' },
+  { value: '교체대상', label: '교체대상' },
+];
+
+function AddModal({
+  onClose,
+  onSaved,
+}: {
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState<AddForm>({
+    location:      '',
+    type:          '',
+    mfgDate:       '',
+    lastCheckDate: '',
+    manager:       '',
+    status:        '정상',
+    note:          '',
+  });
+
+  const set = (k: keyof AddForm, v: string) =>
+    setForm(f => ({ ...f, [k]: v }));
+
+  const handleSave = () => {
+    if (!form.location.trim()) { alert('설치 위치를 입력하세요.'); return; }
+    if (!form.type.trim())     { alert('소화기 종류를 입력하세요.'); return; }
+    if (!form.mfgDate.trim())  { alert('제조년월을 입력하세요.'); return; }
+
+    const newId = getNextExtinguisherId();
+    const newFe: Extinguisher = {
+      id:            newId,
+      location:      form.location.trim(),
+      type:          form.type.trim(),
+      mfgDate:       form.mfgDate.trim(),
+      lastCheckDate: form.lastCheckDate,
+      manager:       form.manager.trim(),
+      status:        form.status,
+      note:          form.note.trim(),
+      // mapX, mapY, floor 없음 — 미배치 상태로 등록
+    };
+    addNewExtinguisher(newFe);
+    onSaved();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.45)' }}
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-[480px] max-w-[95vw] overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* ── 헤더 ── */}
+        <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+            </svg>
+            <h2 className="text-lg font-bold text-gray-900">소화기 추가</h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* ── 폼 ── */}
+        <div className="px-6 py-5 space-y-4 max-h-[65vh] overflow-y-auto">
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">
+              설치 위치 <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={form.location}
+              onChange={e => set('location', e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="예) 관리동 1층(현관)"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">
+              소화기 종류 <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={form.type}
+              onChange={e => set('type', e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="예) ABC분말 3.3kg"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">
+              제조년월 <span className="text-red-500">*</span>
+              <span className="text-gray-400 font-normal ml-1">(YYYY-MM)</span>
+            </label>
+            <input
+              type="text"
+              value={form.mfgDate}
+              onChange={e => set('mfgDate', e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="예) 2024-08"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">담당자</label>
+            <input
+              type="text"
+              value={form.manager}
+              onChange={e => set('manager', e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="담당자 이름"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">최근 점검일</label>
+            <input
+              type="date"
+              value={form.lastCheckDate}
+              onChange={e => set('lastCheckDate', e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">상태</label>
+            <select
+              value={form.status}
+              onChange={e => set('status', e.target.value)}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+            >
+              {STATUS_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">비고</label>
+            <textarea
+              value={form.note}
+              onChange={e => set('note', e.target.value)}
+              rows={2}
+              className="w-full px-3.5 py-2.5 text-sm border border-gray-200 rounded-lg resize-none
+                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="특이사항 입력"
+            />
+          </div>
+        </div>
+
+        {/* ── 하단 버튼 ── */}
+        <div className="px-6 pb-6 pt-2 flex gap-3 border-t border-gray-100">
+          <button
+            onClick={handleSave}
+            className="flex-1 flex items-center justify-center gap-2 py-3
+                       bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold
+                       rounded-xl transition shadow-sm"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+            </svg>
+            추가 완료
+          </button>
+          <button
+            onClick={onClose}
+            className="px-5 py-3 text-sm font-semibold text-gray-500 bg-gray-50 hover:bg-gray-100
+                       border border-gray-200 rounded-xl transition"
+          >
+            취소
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /* ═══════════════════════════════════════════
@@ -567,16 +772,13 @@ function DeleteModal({
 }
 
 /* ═══════════════════════════════════════════
-   메인 ListView 컴포넌트
+   메인 ListView 컴포넌트 — props 없음
 ═══════════════════════════════════════════ */
-interface ListViewProps {
-  onGoToMap: () => void;
-}
-
-export default function ListView({ onGoToMap }: ListViewProps) {
+export default function ListView() {
   const [data, setData]               = useState<EnrichedExtinguisher[]>([]);
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('전체');
   const [searchText, setSearchText]   = useState('');
+  const [showAddModal, setShowAddModal] = useState(false);
 
   /* 모달 상태 */
   const [inspectTarget, setInspectTarget] = useState<EnrichedExtinguisher | null>(null);
@@ -608,7 +810,7 @@ export default function ListView({ onGoToMap }: ListViewProps) {
 
   /* ── 단일 선택 필터 토글
        같은 카드를 다시 누르면 '전체'로 복귀
-       '불량' 카드는 미구현 상태라 클릭해도 필터링 없이 '전체' 유지 ── */
+       '불량' 카드는 미구현이므로 클릭해도 필터 변경 없음 ── */
   const handleFilterClick = (key: SummaryKey) => {
     if (key === '불량') return; // 미구현 — 클릭 무시
     setFilterStatus(prev => (prev === key ? '전체' : key));
@@ -647,25 +849,31 @@ export default function ListView({ onGoToMap }: ListViewProps) {
     loadData();
   };
 
+  /* ── 추가 완료 콜백 ── */
+  const handleAddSaved = () => {
+    setShowAddModal(false);
+    loadData();
+  };
+
   return (
     <div className="p-6 space-y-4 bg-gray-50 min-h-full">
 
       {/* ── 요약 카드 5개 ── */}
       <div className="grid grid-cols-5 gap-4">
         {SUMMARY_CARDS.map(({ key, label, gradient, icon }) => {
-          const count     = counts[key] ?? 0;
-          const isActive  = filterStatus === key;
-          const isDisabled = key === '불량';
+          const count    = counts[key] ?? 0;
+          const isActive = filterStatus === key;
+          // '불량' 카드: disabled 제거 — 일반 div처럼 보이되 클릭 시 아무 필터도 적용 안 됨
+          const isBadge  = key === '불량';
           return (
             <button
               key={key}
               onClick={() => handleFilterClick(key)}
-              disabled={isDisabled}
               className={[
                 gradient,
                 'relative rounded-xl p-5 text-left text-white transition-all shadow-md',
-                isDisabled
-                  ? 'opacity-60 cursor-not-allowed'
+                isBadge
+                  ? 'cursor-default'   // 클릭은 되지만 필터 변경 없음, 시각적 눌림 없음
                   : isActive
                     ? 'ring-4 ring-white ring-offset-2 ring-offset-gray-200 scale-[1.02]'
                     : 'hover:brightness-105 hover:shadow-lg cursor-pointer',
@@ -676,7 +884,7 @@ export default function ListView({ onGoToMap }: ListViewProps) {
               <p className="text-4xl font-black text-white leading-none">
                 {count}<span className="text-lg font-semibold ml-1">개</span>
               </p>
-              {isActive && !isDisabled && (
+              {isActive && !isBadge && (
                 <div className="mt-2 flex items-center gap-1 text-white/80 text-xs">
                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd"
@@ -719,9 +927,9 @@ export default function ListView({ onGoToMap }: ListViewProps) {
           )}
         </div>
 
-        {/* + 소화기 추가 → 공장 도면 탭으로 이동 */}
+        {/* + 소화기 추가 → AddModal 오픈 */}
         <button
-          onClick={onGoToMap}
+          onClick={() => setShowAddModal(true)}
           className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-700
                      text-white text-sm font-semibold rounded-lg transition shadow-sm whitespace-nowrap"
         >
@@ -782,7 +990,7 @@ export default function ListView({ onGoToMap }: ListViewProps) {
                     </p>
                     {data.length === 0 && (
                       <button
-                        onClick={onGoToMap}
+                        onClick={() => setShowAddModal(true)}
                         className="mt-3 inline-flex items-center gap-1.5 px-4 py-2
                                    bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold
                                    rounded-lg transition shadow-sm"
@@ -790,7 +998,7 @@ export default function ListView({ onGoToMap }: ListViewProps) {
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
                         </svg>
-                        공장 도면에서 추가하기
+                        소화기 추가하기
                       </button>
                     )}
                   </td>
@@ -933,6 +1141,12 @@ export default function ListView({ onGoToMap }: ListViewProps) {
       </div>
 
       {/* ── 모달 렌더링 ── */}
+      {showAddModal && (
+        <AddModal
+          onClose={() => setShowAddModal(false)}
+          onSaved={handleAddSaved}
+        />
+      )}
       {inspectTarget && (
         <InspectModal
           item={inspectTarget}
