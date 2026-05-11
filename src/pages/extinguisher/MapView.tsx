@@ -861,7 +861,7 @@ function FloorView({
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4"/>
               </svg>
-              {addMode ? '도면 클릭 → 위치 지정' : '+ 소화기 추가'}
+              {addMode ? '도면 클릭 → 위치 지정' : '소화기 추가'}
             </button>
 
             {/* 위치 편집 */}
@@ -1248,7 +1248,7 @@ function imgDist(a: Point, b: Point, W: number, H: number) {
 function FloorSelectPopup({
   poly,
   floors,
-  anchorPx,   // 팝업 위치 (이미지 픽셀 좌표)
+  anchorPx,   // 팝업 앵커 (이미지 픽셀 좌표 — 폴리곤 하단 라벨 중앙)
   scale,
   offset,
   canvasSize,
@@ -1264,7 +1264,8 @@ function FloorSelectPopup({
   onSelect: (floor: FloorDef) => void;
   onClose: () => void;
 }) {
-  // 이미지 픽셀 좌표 → 캔버스 화면 좌표
+  // 이미지 픽셀 좌표 → 캔버스 DOM 좌표
+  // 캔버스 중앙을 기준으로 offset·scale 적용
   const screenX = canvasSize.w / 2 + offset.x + (anchorPx.x - AERIAL_W / 2) * scale;
   const screenY = canvasSize.h / 2 + offset.y + (anchorPx.y - AERIAL_H / 2) * scale;
 
@@ -1273,23 +1274,25 @@ function FloorSelectPopup({
   return (
     <div
       className="absolute z-30 pointer-events-none"
-      style={{ left: screenX, top: screenY, transform: 'translate(-50%, -120%)' }}
+      style={{
+        left: screenX,
+        // 팝업을 앵커 바로 위에 배치: 꼬리(10px) + 여유(4px) 만큼 올림
+        top: screenY,
+        transform: 'translate(-50%, calc(-100% - 14px))',
+      }}
     >
       <div
-        className="pointer-events-auto bg-white rounded-2xl shadow-2xl overflow-hidden"
-        style={{
-          border: `2px solid ${poly.color}`,
-          minWidth: 200,
-        }}
+        className="pointer-events-auto bg-white rounded-2xl shadow-2xl overflow-visible"
+        style={{ border: `2px solid ${poly.color}`, minWidth: 196 }}
         onClick={e => e.stopPropagation()}
       >
         {/* 헤더 */}
         <div
-          className="flex items-center justify-between px-4 py-3"
+          className="flex items-center justify-between px-4 py-3 rounded-t-2xl"
           style={{ background: poly.color }}
         >
           <div className="flex items-center gap-2">
-            <span className="text-lg">🏢</span>
+            <span className="text-base">🏢</span>
             <div>
               <p className="text-white font-bold text-sm leading-tight">{poly.name}</p>
               <p className="text-white/70 text-[10px]">
@@ -1307,37 +1310,25 @@ function FloorSelectPopup({
           </button>
         </div>
 
-        {/* 층 버튼 목록 */}
+        {/* 층 버튼 목록 — '전체 보기' 없이 층별 버튼만 */}
         {hasFloors ? (
           <div className="p-2 flex flex-col gap-1">
-            {/* 전체 버튼 */}
-            <button
-              onClick={() => onSelect(floors[0])}
-              className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-700 hover:text-white transition-all group"
-              style={{}}
-              onMouseEnter={e => (e.currentTarget.style.background = poly.color)}
-              onMouseLeave={e => (e.currentTarget.style.background = '')}
-            >
-              <span className="text-base">📋</span>
-              <span>전체 보기</span>
-              <svg className="w-4 h-4 ml-auto text-gray-300 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/>
-              </svg>
-            </button>
-            {/* 층별 버튼 */}
             {floors.map((f, i) => (
               <button
                 key={f.id}
                 onClick={() => onSelect(f)}
-                className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-700 hover:text-white transition-all group"
+                className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-700 hover:text-white transition-all"
                 onMouseEnter={e => (e.currentTarget.style.background = poly.color)}
                 onMouseLeave={e => (e.currentTarget.style.background = '')}
               >
-                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-gray-100 group-hover:bg-white/20 flex items-center justify-center text-xs font-black" style={{ color: poly.color }}>
+                <span
+                  className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-black"
+                  style={{ background: `${poly.color}22`, color: poly.color }}
+                >
                   {i + 1}
                 </span>
                 <span>{f.label}</span>
-                <svg className="w-4 h-4 ml-auto text-gray-300 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 ml-auto text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/>
                 </svg>
               </button>
@@ -1350,14 +1341,24 @@ function FloorSelectPopup({
           </div>
         )}
 
-        {/* 꼬리 삼각형 */}
+        {/* 꼬리 삼각형 — 팝업 아래쪽 중앙, 앵커 포인트를 향함 */}
         <div
           className="absolute left-1/2 -translate-x-1/2 w-0 h-0"
           style={{
-            bottom: -10,
+            bottom: -11,
             borderLeft: '10px solid transparent',
             borderRight: '10px solid transparent',
-            borderTop: `10px solid ${poly.color}`,
+            borderTop: `11px solid ${poly.color}`,
+          }}
+        />
+        {/* 꼬리 흰 내부 (테두리 색 가림) */}
+        <div
+          className="absolute left-1/2 -translate-x-1/2 w-0 h-0"
+          style={{
+            bottom: -9,
+            borderLeft: '8px solid transparent',
+            borderRight: '8px solid transparent',
+            borderTop: '9px solid white',
           }}
         />
       </div>
@@ -1759,7 +1760,12 @@ function AerialView({
           <FloorSelectPopup
             poly={popupPoly}
             floors={BUILDING_FLOORS[popupPoly.name] ?? []}
-            anchorPx={(() => { const { cx, cy } = centroid(popupPoly.points, AERIAL_W, AERIAL_H); return { x: cx, y: cy }; })()}
+            anchorPx={(() => {
+                // 폴리곤 중심 cx + 라벨 상단 y (라벨 상단 = 중심y - 14px)
+                // 팝업 꼬리가 라벨 중앙에 자석처럼 달라붙게 함
+                const { cx, cy } = centroid(popupPoly.points, AERIAL_W, AERIAL_H);
+                return { x: cx, y: cy - 14 };
+              })()}
             scale={scale}
             offset={offset}
             canvasSize={canvasSize}
