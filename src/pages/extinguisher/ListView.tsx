@@ -26,9 +26,19 @@ const CHECK_ITEMS = [
 ] as const;
 
 /* ─────────────────────────────────────────
-   요약 카드 정의
+   요약 카드 정의 — key는 반드시 고유해야 단일 선택 동작
+   '불량'은 현재 미구현 상태로 별도 key 부여
 ───────────────────────────────────────── */
-const SUMMARY_CARDS: { key: FilterStatus; label: string; gradient: string; icon: JSX.Element }[] = [
+type SummaryKey = '전체' | '양호' | '점검필요' | '교체대상' | '불량';
+
+interface SummaryCard {
+  key: SummaryKey;
+  label: string;
+  gradient: string;
+  icon: JSX.Element;
+}
+
+const SUMMARY_CARDS: SummaryCard[] = [
   {
     key: '전체',
     label: '전체 소화기',
@@ -63,7 +73,7 @@ const SUMMARY_CARDS: { key: FilterStatus; label: string; gradient: string; icon:
     ),
   },
   {
-    key: '점검필요' as FilterStatus,
+    key: '불량',
     label: '불량(준비중)',
     gradient: 'bg-purple-600',
     icon: (
@@ -119,7 +129,6 @@ function InspectModal({
   onClose: () => void;
   onDone: (updated: Extinguisher) => void;
 }) {
-  /* 각 항목 상태: true=정상, false=비정상, null=미선택 */
   const [checks, setChecks] = useState<(boolean | null)[]>(
     CHECK_ITEMS.map(() => null)
   );
@@ -204,7 +213,6 @@ function InspectModal({
         <div className="px-6 py-2 space-y-0 divide-y divide-gray-100">
           {CHECK_ITEMS.map((label, idx) => (
             <div key={idx} className="flex items-center justify-between py-3.5">
-              {/* 번호 + 항목명 */}
               <div className="flex items-center gap-3">
                 <span className="w-6 h-6 rounded-full bg-gray-100 text-gray-500
                                  flex items-center justify-center text-xs font-bold flex-shrink-0">
@@ -212,8 +220,6 @@ function InspectModal({
                 </span>
                 <span className="text-sm text-gray-700">{label}</span>
               </div>
-
-              {/* 정상 / 비정상 토글 */}
               <div className="flex items-center gap-2 flex-shrink-0 ml-4">
                 <button
                   onClick={() => toggle(idx, true)}
@@ -252,7 +258,7 @@ function InspectModal({
           ))}
         </div>
 
-        {/* ── 결과 알림 (모든 항목 선택 시) ── */}
+        {/* ── 결과 알림 ── */}
         {allSelected && (
           <div className={[
             'mx-6 mb-3 px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-medium',
@@ -270,7 +276,8 @@ function InspectModal({
             ) : (
               <>
                 <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+                    d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
                 </svg>
                 비정상 항목 있음 — 점검 완료 시 점검필요로 갱신됩니다.
               </>
@@ -291,7 +298,8 @@ function InspectModal({
             ].join(' ')}
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             점검 완료
           </button>
@@ -391,8 +399,6 @@ function EditModal({
 
         {/* ── 폼 ── */}
         <div className="px-6 py-5 space-y-4 max-h-[65vh] overflow-y-auto">
-
-          {/* 설치 위치 */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">
               설치 위치 <span className="text-red-500">*</span>
@@ -406,8 +412,6 @@ function EditModal({
               placeholder="예) 관리동 1층(현관)"
             />
           </div>
-
-          {/* 소화기 종류 */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">
               소화기 종류 <span className="text-red-500">*</span>
@@ -421,8 +425,6 @@ function EditModal({
               placeholder="예) ABC분말 3.3kg"
             />
           </div>
-
-          {/* 제조년월 */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">
               제조년월 <span className="text-red-500">*</span>
@@ -437,8 +439,6 @@ function EditModal({
               placeholder="예) 2024-08"
             />
           </div>
-
-          {/* 담당자 */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">담당자</label>
             <input
@@ -450,8 +450,6 @@ function EditModal({
               placeholder="담당자 이름"
             />
           </div>
-
-          {/* 최근 점검일 */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">최근 점검일</label>
             <input
@@ -462,8 +460,6 @@ function EditModal({
                          focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
-
-          {/* 비고 */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">비고</label>
             <textarea
@@ -530,9 +526,7 @@ function DeleteModal({
         className="bg-white rounded-2xl shadow-2xl w-[380px] max-w-[95vw] overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        {/* ── 본문 ── */}
         <div className="px-8 pt-8 pb-6 text-center">
-          {/* 휴지통 아이콘 */}
           <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-5">
             <svg className="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
@@ -540,17 +534,11 @@ function DeleteModal({
                    m5 4v6m4-6v6M1 7h22M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" />
             </svg>
           </div>
-
-          {/* 제목 */}
           <h2 className="text-lg font-bold text-gray-900 mb-2">소화기를 삭제할까요?</h2>
-
-          {/* 설명 */}
           <p className="text-sm text-gray-500">
             <span className="font-semibold text-gray-700">"{item.location}"</span> 항목이 영구 삭제됩니다.
           </p>
         </div>
-
-        {/* ── 하단 버튼 ── */}
         <div className="px-6 pb-6 flex gap-3">
           <button
             onClick={handleDelete}
@@ -581,7 +569,11 @@ function DeleteModal({
 /* ═══════════════════════════════════════════
    메인 ListView 컴포넌트
 ═══════════════════════════════════════════ */
-export default function ListView() {
+interface ListViewProps {
+  onGoToMap: () => void;
+}
+
+export default function ListView({ onGoToMap }: ListViewProps) {
   const [data, setData]               = useState<EnrichedExtinguisher[]>([]);
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('전체');
   const [searchText, setSearchText]   = useState('');
@@ -610,8 +602,17 @@ export default function ListView() {
     전체:    data.length,
     양호:    data.filter(d => d.computedStatus === '양호').length,
     점검필요: data.filter(d => d.computedStatus === '점검필요').length,
+    불량:    0, // 미구현
     교체대상: data.filter(d => d.computedStatus === '교체대상').length,
   }), [data]);
+
+  /* ── 단일 선택 필터 토글
+       같은 카드를 다시 누르면 '전체'로 복귀
+       '불량' 카드는 미구현 상태라 클릭해도 필터링 없이 '전체' 유지 ── */
+  const handleFilterClick = (key: SummaryKey) => {
+    if (key === '불량') return; // 미구현 — 클릭 무시
+    setFilterStatus(prev => (prev === key ? '전체' : key));
+  };
 
   /* ── 필터 + 검색 ── */
   const filtered = useMemo(() => {
@@ -652,18 +653,22 @@ export default function ListView() {
       {/* ── 요약 카드 5개 ── */}
       <div className="grid grid-cols-5 gap-4">
         {SUMMARY_CARDS.map(({ key, label, gradient, icon }) => {
-          const count    = counts[key as keyof typeof counts] ?? 0;
-          const isActive = filterStatus === key;
+          const count     = counts[key] ?? 0;
+          const isActive  = filterStatus === key;
+          const isDisabled = key === '불량';
           return (
             <button
-              key={label}
-              onClick={() => setFilterStatus(prev => prev === key ? '전체' : key)}
+              key={key}
+              onClick={() => handleFilterClick(key)}
+              disabled={isDisabled}
               className={[
                 gradient,
                 'relative rounded-xl p-5 text-left text-white transition-all shadow-md',
-                isActive
-                  ? 'ring-4 ring-white ring-offset-2 ring-offset-gray-200 scale-[1.02]'
-                  : 'hover:brightness-105 hover:shadow-lg',
+                isDisabled
+                  ? 'opacity-60 cursor-not-allowed'
+                  : isActive
+                    ? 'ring-4 ring-white ring-offset-2 ring-offset-gray-200 scale-[1.02]'
+                    : 'hover:brightness-105 hover:shadow-lg cursor-pointer',
               ].join(' ')}
             >
               <div className="absolute top-4 right-4 opacity-60">{icon}</div>
@@ -671,7 +676,7 @@ export default function ListView() {
               <p className="text-4xl font-black text-white leading-none">
                 {count}<span className="text-lg font-semibold ml-1">개</span>
               </p>
-              {isActive && (
+              {isActive && !isDisabled && (
                 <div className="mt-2 flex items-center gap-1 text-white/80 text-xs">
                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd"
@@ -686,39 +691,58 @@ export default function ListView() {
         })}
       </div>
 
-      {/* ── 검색창 ── */}
-      <div className="relative max-w-sm">
-        <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
-          fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-            d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-        </svg>
-        <input
-          type="text"
-          value={searchText}
-          onChange={e => setSearchText(e.target.value)}
-          placeholder="위치, 종류, 담당자 검색..."
-          className="w-full pl-10 pr-9 py-2.5 text-sm border border-gray-300 rounded-lg bg-white
-                     focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm"
-        />
-        {searchText && (
-          <button
-            onClick={() => setSearchText('')}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        )}
+      {/* ── 검색창 + 소화기 추가 버튼 ── */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="relative flex-1 max-w-sm">
+          <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
+            fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+          </svg>
+          <input
+            type="text"
+            value={searchText}
+            onChange={e => setSearchText(e.target.value)}
+            placeholder="위치, 종류, 담당자 검색..."
+            className="w-full pl-10 pr-9 py-2.5 text-sm border border-gray-300 rounded-lg bg-white
+                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm"
+          />
+          {searchText && (
+            <button
+              onClick={() => setSearchText('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+
+        {/* + 소화기 추가 → 공장 도면 탭으로 이동 */}
+        <button
+          onClick={onGoToMap}
+          className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-700
+                     text-white text-sm font-semibold rounded-lg transition shadow-sm whitespace-nowrap"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+          </svg>
+          + 소화기 추가
+        </button>
       </div>
 
       {/* ── 데이터 테이블 ── */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="px-5 py-3 border-b border-gray-100">
+        <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
           <span className="text-sm text-gray-500">
             <span className="font-semibold text-gray-800">{filtered.length}</span>개 항목
           </span>
+          {filterStatus !== '전체' && (
+            <span className="text-xs text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full font-medium border border-blue-100">
+              필터: {filterStatus}
+            </span>
+          )}
         </div>
 
         <div className="overflow-x-auto">
@@ -750,20 +774,37 @@ export default function ListView() {
               {filtered.length === 0 ? (
                 <tr>
                   <td colSpan={11} className="py-20 text-center text-gray-400">
-                    <div className="text-4xl mb-2">🔍</div>
-                    <p className="text-sm">검색 결과가 없습니다.</p>
+                    <div className="text-4xl mb-3">🧯</div>
+                    <p className="text-sm font-medium text-gray-500 mb-1">
+                      {data.length === 0
+                        ? '등록된 소화기가 없습니다.'
+                        : '검색 결과가 없습니다.'}
+                    </p>
+                    {data.length === 0 && (
+                      <button
+                        onClick={onGoToMap}
+                        className="mt-3 inline-flex items-center gap-1.5 px-4 py-2
+                                   bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold
+                                   rounded-lg transition shadow-sm"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                        </svg>
+                        공장 도면에서 추가하기
+                      </button>
+                    )}
                   </td>
                 </tr>
               ) : (
                 filtered.map(item => {
-                  const badge        = BADGE[item.computedStatus] ?? BADGE['양호'];
-                  const isReplace    = item.computedStatus === '교체대상';
+                  const badge         = BADGE[item.computedStatus] ?? BADGE['양호'];
+                  const isReplace     = item.computedStatus === '교체대상';
                   const isCheckNeeded = item.computedStatus === '점검필요';
-                  const locParts     = item.location.split(' - ');
-                  const locTop       = locParts[0] ?? '';
-                  const locBot       = locParts[1] ?? item.location;
-                  const replaceColor = isReplace ? 'text-red-500 font-bold' : 'text-gray-500';
-                  const checkColor   = isCheckNeeded || isReplace ? 'text-amber-500 font-medium' : 'text-gray-600';
+                  const locParts      = item.location.split(' - ');
+                  const locTop        = locParts[0] ?? '';
+                  const locBot        = locParts[1] ?? item.location;
+                  const replaceColor  = isReplace ? 'text-red-500 font-bold' : 'text-gray-500';
+                  const checkColor    = isCheckNeeded || isReplace ? 'text-amber-500 font-medium' : 'text-gray-600';
 
                   return (
                     <tr
